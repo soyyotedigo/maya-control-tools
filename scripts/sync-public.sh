@@ -27,7 +27,11 @@ fi
 echo "==> Syncing from $SRC to $DEST"
 
 # ── 1. Clean destination (keep .git) ──
-find "$DEST" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+for path in "$DEST"/* "$DEST"/.[!.]* "$DEST"/..?*; do
+    [ -e "$path" ] || continue
+    [ "$(basename "$path")" = ".git" ] && continue
+    rm -rf "$path" 2>/dev/null || echo "WARN: Could not remove $path (in use)"
+done
 
 # ── 2. Copy project structure ──
 cp -r "$SRC/app"    "$DEST/"
@@ -35,17 +39,10 @@ cp -r "$SRC/tests"  "$DEST/"
 cp -r "$SRC/module" "$DEST/"
 cp -r "$SRC/scripts" "$DEST/"
 mkdir -p "$DEST/docs"
-cp -r "$SRC/docs/screenshots" "$DEST/docs/"
+mkdir -p "$DEST/docs/screenshots"
+cp -r "$SRC/docs/screenshots/." "$DEST/docs/screenshots/" 2>/dev/null || true
 
-# docs — skip internal AI notes and evaluations
-for f in "$SRC/docs/"*.md; do
-    fname="$(basename "$f")"
-    case "$fname" in
-        GEMINI.md) ;;          # skip — internal AI prompt
-        *) cp "$f" "$DEST/docs/" 2>/dev/null || true ;;
-    esac
-done
-# evaluations folder is intentionally excluded
+# docs — intentionally sync only screenshots
 
 # CI — only the test workflow, not the sync workflow itself
 mkdir -p "$DEST/.github/workflows"
