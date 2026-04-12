@@ -72,6 +72,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python for test deps
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Prepare pytest deps for mayapy
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --target .ci/pytest-deps "pytest<9"
+
       - name: Pull Maya Docker image
         id: image
         shell: bash
@@ -99,7 +109,7 @@ jobs:
             -w /work \
             -e QT_QPA_PLATFORM=offscreen \
             mottosso/maya:${{ matrix.maya_version }} \
-            bash -lc "mayapy -m pip install pytest && mayapy -m pytest tests/maya -v --tb=short" \
+            bash -lc "PYTHONPATH=/work/.ci/pytest-deps mayapy -m pytest tests/maya -v --tb=short" \
             | tee maya-${{ matrix.maya_version }}.log
 
       - name: Upload Maya test log
