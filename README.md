@@ -24,14 +24,14 @@ Riggers and animators spend hours creating or tweaking control curves by hand, a
 ![ControlMe demo - create/apply](docs/screenshots/control.gif)
 
 Comment:
-- Add your note here about what is happening in this GIF.
+- You can save multiple versions of the same control with different colors to the database, then replace existing controls in your scene while preserving their behavior and connections—without breaking anything. The database is fully exportable.
 
 ### 2) Replace existing controls
 
 ![ControlMe demo - replace](docs/screenshots/replace.gif)
 
 Comment:
-- Add your note here about what is happening in this GIF.
+- You can extract controls from existing geometry, change their colors, duplicate them, delete them, and replace existing scene controls with library shapes — all without breaking animation or connections.
 
 ## What it does
 

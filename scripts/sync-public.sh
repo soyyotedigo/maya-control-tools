@@ -34,6 +34,7 @@ cp -r "$SRC/app"    "$DEST/"
 cp -r "$SRC/tests"  "$DEST/"
 cp -r "$SRC/module" "$DEST/"
 cp -r "$SRC/scripts" "$DEST/"
+cp -r "$SRC/docs/screenshots" "$DEST/"
 
 # docs — skip internal AI notes and evaluations
 mkdir -p "$DEST/docs"

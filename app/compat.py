@@ -380,6 +380,7 @@ def _build_qt_test_stub():
             self._tooltip = ""
             self._style = ""
             self._object_name = ""
+            self._accept_drops = False
 
         def close(self):
             self._closed = True
@@ -441,8 +442,11 @@ def _build_qt_test_stub():
         def findChildren(self, _cls):
             return []
 
-        def setAcceptDrops(self, _enabled):
-            return None
+        def setAcceptDrops(self, enabled):
+            self._accept_drops = bool(enabled)
+
+        def acceptDrops(self):
+            return self._accept_drops
 
         def installEventFilter(self, _obj):
             return None
