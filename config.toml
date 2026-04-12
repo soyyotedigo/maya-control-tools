@@ -1,0 +1,18 @@
+# ControlMe — edit this file to change settings. No Python editing required.
+# Missing or unreadable → built-in defaults apply automatically.
+
+[app]
+version      = "1.5.1"
+window_title = "ControlMe"
+author       = "Cesar Daniel Franco"
+min_width    = 500
+min_height   = 400
+
+[logging]
+max_bytes     = 5242880  # 5 MB
+backup_count  = 5
+file_level    = "DEBUG"
+console_level = "INFO"
+
+[thumbnails]
+lru_cache_size = 256
