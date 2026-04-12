@@ -99,7 +99,7 @@ jobs:
             -w /work \
             -e QT_QPA_PLATFORM=offscreen \
             mottosso/maya:${{ matrix.maya_version }} \
-            bash -lc "python3 -m pip install --target /tmp/pytest-deps 'pytest<9' && PYTHONPATH=/tmp/pytest-deps mayapy -m pytest tests/maya -v --tb=short" \
+            bash -lc "if command -v python3 >/dev/null 2>&1; then PY=python3; elif command -v python >/dev/null 2>&1; then PY=python; else echo 'No bootstrap Python interpreter found in container' >&2; exit 127; fi; \$PY -m pip install --target /tmp/pytest-deps 'pytest<9' && PYTHONPATH=/tmp/pytest-deps mayapy -m pytest tests/maya -v --tb=short" \
             | tee maya-${{ matrix.maya_version }}.log
 
       - name: Upload Maya test log
