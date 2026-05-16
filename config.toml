@@ -2,7 +2,7 @@
 # Missing or unreadable → built-in defaults apply automatically.
 
 [app]
-version      = "1.5.6"
+version      = "1.10.3"
 window_title = "ControlMe"
 author       = "Cesar Daniel Franco"
 min_width    = 500

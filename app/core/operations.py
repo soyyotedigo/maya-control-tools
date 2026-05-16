@@ -277,25 +277,50 @@ def _flat_axis(sx: float, sy: float, sz: float) -> str | None:
     return axis if (min_s / max_s) < 0.15 else None
 
 
-def replace_control(node: str, shape: dict) -> None:
+def replace_control(
+    node: str,
+    shape: dict,
+    replace_name: bool = False,
+    replace_color: bool = True,
+) -> str:
     """Swap the curve shape of a Maya control with a library shape.
 
     Preserves the existing object-space size, CV center offset, and
     guesses orientation from the flat axis of the old curve layout.
 
-    Steps:
-
-    1. Read old CVs in object space → extract size, center, flat axis.
-    2. Build new shape from library (centred at origin, normalised to 1 unit).
-    3. Rotate new shape so its flat axis matches the old one.
-    4. Scale to match old object-space size.
-    5. Swap shapes; offset CVs to restore old object-space center.
-    6. Re-apply library color if stored.
-
     Args:
-        node:  Existing Maya transform node name.
-        shape: Shape dict from the database (as returned by ``db.get_shape``).
+        node:          Existing Maya transform node name.
+        shape:         Shape dict from the database (as returned by ``db.get_shape``).
+        replace_name:  When True, rename the transform to the library shape label.
+        replace_color: When True (default), apply the library color to the new
+                       shape. When False, re-apply whatever color override the
+                       original control already had (preserving scene color).
+
+    Returns:
+        The final Maya transform node name (may differ from *node* when
+        ``replace_name=True`` and the node was successfully renamed).
     """
+    # ── 0. Capture existing color override so we can restore it after swap ──
+    # Read ALL override attrs (not just RGB) so index-based colors (the
+    # standard Maya integer palette) are preserved as well as RGB overrides.
+    original_color_attrs: dict | None = None
+    if not replace_color:
+        pre_shapes = cmds.listRelatives(node, shapes=True, type="nurbsCurve", fullPath=True) or []
+        if pre_shapes:
+            sh0 = pre_shapes[0]
+            try:
+                if cmds.getAttr(f"{sh0}.overrideEnabled"):
+                    original_color_attrs = {
+                        "overrideEnabled":   True,
+                        "overrideRGBColors": cmds.getAttr(f"{sh0}.overrideRGBColors"),
+                        "overrideColor":     int(cmds.getAttr(f"{sh0}.overrideColor")),
+                        "overrideColorR":    cmds.getAttr(f"{sh0}.overrideColorR"),
+                        "overrideColorG":    cmds.getAttr(f"{sh0}.overrideColorG"),
+                        "overrideColorB":    cmds.getAttr(f"{sh0}.overrideColorB"),
+                    }
+            except Exception:
+                pass
+
     # ── 1. Analyse existing shape in object space ─────────────────────────
     # Use fullPath=True so the shape name is always unique, even when the
     # scene contains multiple nodes with the same short name.
@@ -387,15 +412,35 @@ def replace_control(node: str, shape: dict) -> None:
         for sh in (cmds.listRelatives(node, shapes=True, type="nurbsCurve", fullPath=True) or []):
             cmds.move(ocx, ocy, ocz, f"{sh}.cv[*]", relative=True, objectSpace=True)
 
-    cmds.xform(node, centerPivots=True)
+    # Note: deliberately NOT calling cmds.xform(node, centerPivots=True) here.
+    # The transform's pivot is a user-owned property — a shape swap must not
+    # silently re-center it (this caused a regression where any pivot that
+    # had been moved manually got snapped to the new shape's geometric center).
 
-    # ── 6. Re-apply library color ─────────────────────────────────────────
+    # ── 6. Apply color ────────────────────────────────────────────────────
     from app.core.shape_data import decode_color
-    color = decode_color(shape.get("color"))
-    if color:
-        ctrl.set_color(color)
+    if replace_color:
+        color = decode_color(shape.get("color"))
+        if color:
+            ctrl.set_color(color)
+    elif original_color_attrs:
+        # Write every captured override attr directly so both RGB and
+        # index-based colors are restored faithfully.
+        for sh in (cmds.listRelatives(node, shapes=True, type="nurbsCurve", fullPath=True) or []):
+            for attr, value in original_color_attrs.items():
+                try:
+                    cmds.setAttr(f"{sh}.{attr}", value)
+                except Exception:
+                    pass
+
+    # ── 7. Optionally rename the transform to match the library label ─────
+    if replace_name:
+        raw = shape.get("label", "").strip().replace(" ", "_")
+        if raw:
+            node = cmds.rename(node, raw) or node
 
     log.debug("replace_control: replaced shape on %r", node)
+    return node
 
 
 # ---------------------------------------------------------------------------
@@ -431,18 +476,54 @@ def rotate_control_cvs(node: str, axis: str, degrees: float = 90.0) -> None:
     log.debug("rotate_control_cvs: %r rotated %.0f° on %s", node, degrees, axis.upper())
 
 
+def scale_control_cvs(node: str, factor: float) -> None:
+    """Uniformly scale a control's curve CVs in its own object space.
+
+    Like ``rotate_control_cvs``, this moves only the CV points — the
+    transform's scale stays at 1,1,1 and pivot/connections are untouched.
+
+    Args:
+        node:   Maya transform node name.
+        factor: Uniform scale multiplier (1.0 = no change).
+    """
+    shapes = cmds.listRelatives(node, shapes=True, type="nurbsCurve",
+                                fullPath=True) or []
+    if not shapes:
+        log.warning("scale_control_cvs: no nurbsCurve shapes on %r", node)
+        return
+
+    for sh in shapes:
+        cvs = cmds.ls(f"{sh}.cv[*]", flatten=True) or []
+        if cvs:
+            cmds.scale(factor, factor, factor, cvs,
+                       objectSpace=True, relative=True)
+
+    log.debug("scale_control_cvs: %r scaled by %.4f", node, factor)
+
+
 # ---------------------------------------------------------------------------
 # 6. Batch / selection-driven use cases
 # ---------------------------------------------------------------------------
 
-def replace_controls_in_selection(shape: dict) -> int:
+def replace_controls_in_selection(
+    shape: dict,
+    replace_name: bool = False,
+    replace_color: bool = True,
+    extract_to_mgear: bool = False,
+) -> int:
     """Swap the curve shape of every selected Maya transform with *shape*.
 
     Wraps all swaps in a single undo chunk so the entire batch is
     reversible with one Ctrl+Z.
 
     Args:
-        shape: Shape dict from the database (as returned by ``db.get_shape``).
+        shape:            Shape dict from the database (as returned by ``db.get_shape``).
+        replace_name:     Rename each transform to the library shape label.
+        replace_color:    Apply library color; when False, preserve scene color.
+        extract_to_mgear: After the swap, call mGear's Extract Controls on the
+                          selection so the matching guide stores the new shape.
+                          Caller is responsible for only setting this when
+                          mGear is available (see ``mgear_integration``).
 
     Returns:
         The number of transforms that were replaced (``0`` when nothing
@@ -451,9 +532,22 @@ def replace_controls_in_selection(shape: dict) -> int:
     sel = cmds.ls(selection=True, transforms=True) or []
     if not sel:
         return 0
+    final_sel: list[str] = []
     with undo_chunk("Replace Control"):
         for node in sel:
-            replace_control(node, shape)
+            final_node = replace_control(
+                node, shape,
+                replace_name=replace_name,
+                replace_color=replace_color,
+            )
+            final_sel.append(final_node)
+        # Control.create_from_db auto-selects the temp node; deleting it
+        # clears the selection. Restore so subsequent scale/rotate ops and
+        # the optional mGear extract below operate on the new controls.
+        cmds.select(final_sel)
+        if extract_to_mgear:
+            from app.core.mgear_integration import extract_controls_on_selection
+            extract_controls_on_selection()
     return len(sel)
 
 
@@ -478,6 +572,153 @@ def rotate_selected_cvs(axis: str, degrees: float) -> int:
         for node in sel:
             rotate_control_cvs(node, axis, degrees)
     return len(sel)
+
+
+def scale_selected_cvs(factor: float) -> int:
+    """Uniformly scale the CVs of every selected Maya control by *factor*.
+
+    Returns the number of transforms that were scaled (``0`` when nothing
+    was selected, or when *factor* is effectively 1.0). The whole operation
+    is wrapped in a single undo chunk, so one call = one Ctrl+Z.
+    """
+    if abs(factor - 1.0) < 1e-6:
+        return 0
+    sel = cmds.ls(selection=True, transforms=True) or []
+    if not sel:
+        return 0
+
+    with undo_chunk("Scale CV"):
+        for node in sel:
+            scale_control_cvs(node, factor)
+    return len(sel)
+
+
+class ScaleDragSession:
+    """Group an entire scale-drag gesture under one undo chunk.
+
+    Usage::
+
+        session = ScaleDragSession.start()  # captures selection, opens chunk
+        if session:
+            session.apply(1.05)             # called per slider tick
+            ...
+            session.end()                   # closes chunk
+
+    ``start()`` returns ``None`` if nothing is selected, so callers can
+    skip the chunk overhead in that case.
+    """
+
+    def __init__(self, nodes: list[str]) -> None:
+        self._nodes = nodes
+        self._closed = False
+
+    @classmethod
+    def start(cls) -> "ScaleDragSession | None":
+        sel = cmds.ls(selection=True, transforms=True) or []
+        if not sel:
+            return None
+        from app.compat import is_maya
+        if is_maya():
+            cmds.undoInfo(openChunk=True, chunkName="Scale CV")
+        return cls(sel)
+
+    def apply(self, factor: float) -> None:
+        if abs(factor - 1.0) < 1e-6:
+            return
+        for node in self._nodes:
+            scale_control_cvs(node, factor)
+
+    def end(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        from app.compat import is_maya
+        if is_maya():
+            cmds.undoInfo(closeChunk=True)
+
+
+# ---------------------------------------------------------------------------
+# 7b. CV snapshot / reset
+# ---------------------------------------------------------------------------
+
+# A snapshot maps shape-name → list of (x, y, z) CV positions in object space.
+CvSnapshot = dict[str, list[tuple[float, float, float]]]
+
+
+def snapshot_cv_positions(node: str) -> CvSnapshot:
+    """Capture object-space CV positions for every nurbsCurve shape on ``node``.
+
+    The result can be passed back to ``restore_cv_positions`` later to undo
+    any number of subsequent CV-level edits (scale, rotate, etc.).
+    """
+    shapes = cmds.listRelatives(node, shapes=True, type="nurbsCurve",
+                                fullPath=True) or []
+    snapshot: CvSnapshot = {}
+    for sh in shapes:
+        cvs = cmds.ls(f"{sh}.cv[*]", flatten=True) or []
+        positions: list[tuple[float, float, float]] = []
+        for cv in cvs:
+            pos = cmds.xform(cv, query=True, objectSpace=True, translation=True)
+            positions.append((pos[0], pos[1], pos[2]))
+        snapshot[sh] = positions
+    return snapshot
+
+
+def restore_cv_positions(node: str, snapshot: CvSnapshot) -> None:
+    """Restore CV positions previously captured by ``snapshot_cv_positions``.
+
+    Silently skips shapes whose CV count no longer matches the snapshot
+    (e.g. the curve was rebuilt), logging a warning instead of raising.
+    """
+    for sh, positions in snapshot.items():
+        cvs = cmds.ls(f"{sh}.cv[*]", flatten=True) or []
+        if len(cvs) != len(positions):
+            log.warning(
+                "restore_cv_positions: CV count mismatch on %r "
+                "(snapshot=%d, current=%d) — skipping",
+                sh, len(positions), len(cvs),
+            )
+            continue
+        for cv, pos in zip(cvs, positions):
+            cmds.xform(cv, objectSpace=True, translation=pos)
+
+
+def ensure_snapshots_for_selection(snapshots: dict[str, CvSnapshot]) -> None:
+    """For every selected transform, add an entry to ``snapshots`` if missing.
+
+    Mutates ``snapshots`` in place. Use this before applying a scale/rotate
+    so that a later reset can restore the original CV positions.
+
+    Existing entries are validated: if the shape nodes on a transform have
+    changed since the snapshot was taken (e.g. Replace Control was called),
+    the stale entry is discarded and re-captured.
+    """
+    sel = cmds.ls(selection=True, transforms=True) or []
+    for node in sel:
+        if node in snapshots:
+            current_shapes = set(
+                cmds.listRelatives(node, shapes=True, type="nurbsCurve", fullPath=True) or []
+            )
+            if set(snapshots[node].keys()) != current_shapes:
+                del snapshots[node]
+        if node not in snapshots:
+            snapshots[node] = snapshot_cv_positions(node)
+
+
+def reset_selected_cvs(snapshots: dict[str, CvSnapshot]) -> int:
+    """Restore CV positions of every selected transform that has a snapshot.
+
+    Returns the number of nodes restored. Whole operation is one undo chunk.
+    Nodes without an entry in ``snapshots`` are silently skipped.
+    """
+    sel = cmds.ls(selection=True, transforms=True) or []
+    targets = [n for n in sel if n in snapshots]
+    if not targets:
+        return 0
+    with undo_chunk("Reset Scale"):
+        for node in targets:
+            restore_cv_positions(node, snapshots[node])
+    return len(targets)
 
 
 def drop_controls_at_origin(shapes: list[dict]) -> list[str]:

@@ -11,6 +11,8 @@ class OutlinerWidget(QtWidgets.QWidget):
 
     shape_selected = QtCore.Signal(str)      # emits shape label on single click
     shape_renamed = QtCore.Signal(str, str)  # emits (old_key, new_label)
+    apply_requested = QtCore.Signal()        # double-click → Replace Control
+    search_changed = QtCore.Signal(str)      # text changed → filter image grid
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -23,11 +25,13 @@ class OutlinerWidget(QtWidgets.QWidget):
 
     def create_actions(self):
         self.replace_action = QAction("Replace Control", self)
+        self.rename_action = QAction("Rename", self)
         self.reset_color_action = QAction("Reset Color", self)
         self.duplicate_action = QAction("Duplicate", self)
         self.remove_action = QAction("Remove", self)
         self.context_menu = QtWidgets.QMenu(self)
         self.context_menu.addAction(self.replace_action)
+        self.context_menu.addAction(self.rename_action)
         self.context_menu.addSeparator()
         self.context_menu.addAction(self.reset_color_action)
         self.context_menu.addAction(self.duplicate_action)
@@ -42,6 +46,8 @@ class OutlinerWidget(QtWidgets.QWidget):
         self.list_widget = QtWidgets.QListWidget()
         self.list_widget.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        # Rename is context-menu only; double-click fires Replace Control.
+        self.list_widget.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
 
     def create_layout(self):
         search_row = QtWidgets.QHBoxLayout()
@@ -65,6 +71,7 @@ class OutlinerWidget(QtWidgets.QWidget):
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.list_widget.itemChanged.connect(self._on_item_renamed)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
+        self.rename_action.triggered.connect(self._on_rename_action)
 
     # ------------------------------------------------------------------
     # Public API — full load
@@ -135,6 +142,7 @@ class OutlinerWidget(QtWidgets.QWidget):
         filtered = set(search_shapes(labels, text))
         matched = [(k, l) for k, l in self._all_items if l in filtered]
         self._refresh(matched)
+        self.search_changed.emit(text)
 
     def _reset(self) -> None:
         self.search_line.clear()
@@ -151,7 +159,12 @@ class OutlinerWidget(QtWidgets.QWidget):
         self.list_widget.blockSignals(False)
 
     def _on_item_double_clicked(self, item) -> None:
-        self.list_widget.editItem(item)
+        self.apply_requested.emit()
+
+    def _on_rename_action(self) -> None:
+        item = getattr(self, "_context_item", None)
+        if item:
+            self.list_widget.editItem(item)
 
     def _on_item_renamed(self, item) -> None:
         old_key = item.data(QtCore.Qt.UserRole)
@@ -174,4 +187,5 @@ class OutlinerWidget(QtWidgets.QWidget):
         self.shape_renamed.emit(old_key, new_label)
 
     def _show_context_menu(self, pos) -> None:
+        self._context_item = self.list_widget.itemAt(pos)
         self.context_menu.exec_(self.list_widget.mapToGlobal(pos))

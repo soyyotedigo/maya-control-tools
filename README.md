@@ -3,7 +3,7 @@
 Maya tool for creating, replacing and managing rig control shapes (NURBS curves) with a PySide2/PySide6 UI.
 
 
-[![Test Suite](https://github.com/soyyotedigo/maya-control-tools-dev/actions/workflows/test-maya-versions.yml/badge.svg)](https://github.com/soyyotedigo/maya-control-tools-dev/actions/workflows/test-maya-versions.yml)
+[![Test Suite](https://github.com/soyyotedigo/maya-control-tools/actions/workflows/test-maya-versions.yml/badge.svg)](https://github.com/soyyotedigo/maya-control-tools/actions/workflows/test-maya-versions.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Maya](https://img.shields.io/badge/Maya-2022%2B-orange)
 ![UI](https://img.shields.io/badge/UI-PySide2%20%7C%20PySide6-green)
@@ -123,7 +123,7 @@ maya-control-tools/
 │   ├── database/
 │   │   └── manager.py       # SQLite persistence for custom shapes
 │   ├── models/
-│   │   └── search.py        # Search strategies (Strategy pattern)
+│   │   └── search.py        # Substring search helper
 │   ├── styles/              # QSS stylesheets
 │   ├── icons/               # UI icons
 │   └── views/

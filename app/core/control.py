@@ -60,34 +60,6 @@ class Control:
         return self.name
 
     # ------------------------------------------------------------------
-    # Replace / swap
-    # ------------------------------------------------------------------
-
-    def replace_shape(self, target_node: str, shape_type: str) -> None:
-        """Replace the curve shape on an existing node without moving it.
-
-        Swaps the shape in-place: the target_node keeps its position,
-        connections, and name — only the visual shape changes.
-
-        Args:
-            target_node: Existing transform node in the scene.
-            shape_type:  Key from SHAPES dict.
-        """
-        temp = Control(name="_controlme_temp")
-        temp.create(shape_type)
-        temp_shapes = cmds.listRelatives(temp.name, shapes=True) or []
-
-        old_shapes = cmds.listRelatives(target_node, shapes=True) or []
-        if old_shapes:
-            cmds.delete(old_shapes)
-
-        for shape in temp_shapes:
-            cmds.parent(shape, target_node, relative=True, shape=True)
-
-        cmds.delete(temp.name)
-        cmds.xform(target_node, centerPivots=True)
-
-    # ------------------------------------------------------------------
     # Color
     # ------------------------------------------------------------------
 
@@ -104,22 +76,6 @@ class Control:
             cmds.setAttr(f"{shape}.overrideColorR", rgb[0])
             cmds.setAttr(f"{shape}.overrideColorG", rgb[1])
             cmds.setAttr(f"{shape}.overrideColorB", rgb[2])
-
-    def reset_color(self) -> None:
-        """Remove the color override and restore default viewport color."""
-        shapes = cmds.listRelatives(self.name, shapes=True) or []
-        for shape in shapes:
-            cmds.setAttr(f"{shape}.overrideEnabled", False)
-
-    # ------------------------------------------------------------------
-    # Removal
-    # ------------------------------------------------------------------
-
-    def remove_shapes(self) -> None:
-        """Delete all curve shapes from this control's transform."""
-        shapes = cmds.listRelatives(self.name, shapes=True) or []
-        if shapes:
-            cmds.delete(shapes)
 
     # ------------------------------------------------------------------
     # Geometry queries
@@ -141,17 +97,6 @@ class Control:
     def get_scale_factor(self) -> float:
         max_dim = self.get_max_dimension()
         return 0.0 if max_dim == 0 else 1.0 / max_dim
-
-    def get_center(self) -> tuple:
-        bb = self.get_bounding_box()
-        return (
-            (bb[0] + bb[3]) / 2,
-            (bb[1] + bb[4]) / 2,
-            (bb[2] + bb[5]) / 2,
-        )
-
-    def set_pivot_to_center(self) -> None:
-        cmds.xform(self.name, centerPivots=True)
 
     def normalize_scale(self) -> None:
         """Scale the control so its largest dimension is 1 unit."""
@@ -363,11 +308,3 @@ class Control:
 
         cmds.xform(node, centerPivots=True)
         return node
-
-    @classmethod
-    def from_selection(cls) -> "Control":
-        """Create a Control instance from the first selected node."""
-        sel = cmds.ls(selection=True)
-        if not sel:
-            raise RuntimeError("Nothing selected in Maya.")
-        return cls(name=sel[0])

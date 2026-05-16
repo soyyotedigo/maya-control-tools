@@ -8,7 +8,15 @@ Run again at any time to hot-reload code changes — no Maya restart needed.
 import sys
 from pathlib import Path
 
-REPO_PATH = str(Path(__file__).parent)
+# Resolve the repo path. When run as a file, use __file__.
+# When pasted into Maya's Script Editor, __file__ is undefined, so fall back
+# to a hardcoded path (edit REPO_FALLBACK to match your local clone).
+REPO_FALLBACK = r"C:\repos\maya-control-tools"
+try:
+    REPO_PATH = str(Path(__file__).parent)
+except NameError:
+    REPO_PATH = REPO_FALLBACK
+
 if REPO_PATH not in sys.path:
     sys.path.insert(0, REPO_PATH)
 

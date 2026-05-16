@@ -191,21 +191,6 @@ def save_custom_shape(
         return cur.lastrowid
 
 
-def save_from_control(name: str, label: str, control_dict: dict) -> int:
-    """Save a shape directly from a Control.to_dict() result."""
-    shapes_data = [{
-        "cv_positions": control_dict["cv_positions"],
-        "degree": control_dict.get("degree", 1),
-        "knots": control_dict.get("knots"),
-    }]
-    return save_custom_shape(
-        name=name,
-        label=label,
-        shapes_data=shapes_data,
-        position=control_dict.get("position"),
-    )
-
-
 def update_shape_color(name: str, rgb: tuple | None) -> None:
     """Save or clear the display color for a shape.
 

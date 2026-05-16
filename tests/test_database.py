@@ -82,25 +82,6 @@ def test_save_custom_shape_full():
     assert json.loads(shape["position"]) == [5.0, 10.0, -3.0]
 
 
-def test_save_from_control():
-    control_dict = {
-        "name": "arm_ctrl",
-        "cv_positions": [(-1, 0, -1), (-1, 0, 1), (1, 0, 1), (1, 0, -1), (-1, 0, -1)],
-        "cv_count": 5,
-        "degree": 1,
-        "knots": [0, 1, 2, 3, 4],
-        "position": (0.0, 5.0, 0.0),
-        "bounding_box": (-1, 0, -1, 1, 0, 1),
-    }
-    row_id = manager.save_from_control("arm_square", "Arm Square", control_dict)
-    assert row_id > 0
-
-    shape = manager.get_shape("arm_square")
-    assert shape["cv_count"] == 5
-    assert shape["degree"] == 1
-    assert json.loads(shape["position"]) == [0.0, 5.0, 0.0]
-
-
 def test_seed_builtins_populates_cv_data():
     manager.seed_builtins()
     shape = manager.get_shape("square")

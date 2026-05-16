@@ -133,6 +133,7 @@ class ImageView(QtWidgets.QWidget):
     shape_selected = QtCore.Signal(str)    # emits shape key
     shape_renamed = QtCore.Signal(str, str)  # emits (old_key, new_label)
     color_picked = QtCore.Signal(tuple)    # emits (r, g, b) float tuple
+    apply_requested = QtCore.Signal()       # double-click → Replace Control
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -163,6 +164,9 @@ class ImageView(QtWidgets.QWidget):
         self.list_widget.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.list_widget.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        # Disable Qt's built-in double-click-to-edit so we can map double-click
+        # to Replace Control; rename is accessible only via the context menu.
+        self.list_widget.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
 
         self.projection_combo = QtWidgets.QComboBox()
         self.projection_combo.addItems(list(PROJECTIONS.keys()))
@@ -171,11 +175,13 @@ class ImageView(QtWidgets.QWidget):
 
         self.context_menu = QtWidgets.QMenu(self)
         self.replace_action = QAction("Replace Control", self)
+        self.rename_action = QAction("Rename", self)
         self.color_action = QAction("Color...", self)
         self.reset_color_action = QAction("Reset Color", self)
         self.duplicate_action = QAction("Duplicate", self)
         self.remove_action = QAction("Remove", self)
         self.context_menu.addAction(self.replace_action)
+        self.context_menu.addAction(self.rename_action)
         self.context_menu.addSeparator()
         self.context_menu.addAction(self.color_action)
         self.context_menu.addAction(self.reset_color_action)
@@ -205,6 +211,7 @@ class ImageView(QtWidgets.QWidget):
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.projection_combo.currentTextChanged.connect(self._on_projection_changed)
         self.color_action.triggered.connect(self._on_compact_color_pick)
+        self.rename_action.triggered.connect(self._on_rename_action)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -248,6 +255,16 @@ class ImageView(QtWidgets.QWidget):
         """Return all selected shape keys."""
         return [item.data(QtCore.Qt.UserRole)
                 for item in self.list_widget.selectedItems()]
+
+    def apply_filter(self, text: str) -> None:
+        """Show only items whose label matches *text*. Empty string shows all."""
+        from app.models.search import search_shapes
+        labels = [s["label"] for s in self._shapes]
+        matched = set(search_shapes(labels, text))
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item:
+                item.setHidden(bool(text) and item.text() not in matched)
 
     def update_shape_color(self, shape_name: str, rgb: tuple | None) -> None:
         """Update the stored color for a shape and refresh its thumbnail.
@@ -315,8 +332,14 @@ class ImageView(QtWidgets.QWidget):
     # ------------------------------------------------------------------
 
     def _on_item_double_clicked(self, item) -> None:
-        """Enter edit mode on double-click so the user can rename."""
-        self.list_widget.editItem(item)
+        """Double-click fires Replace Control, not rename."""
+        self.apply_requested.emit()
+
+    def _on_rename_action(self) -> None:
+        """Start inline rename for the right-clicked item."""
+        item = getattr(self, "_context_item", None)
+        if item:
+            self.list_widget.editItem(item)
 
     def _on_item_renamed(self, item) -> None:
         """Emit rename signal when the user finishes editing a label."""

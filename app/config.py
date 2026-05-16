@@ -36,7 +36,7 @@ def _get(section: str, key: str, default):
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
-VERSION = _get("app", "version", "1.5.6")
+VERSION = _get("app", "version", "1.10.3")
 WINDOW_TITLE = _get("app", "window_title", "ControlMe")
 AUTHOR = _get("app", "author", "Cesar Daniel Franco")
 MIN_WIDTH = _get("app", "min_width", 500)
@@ -50,6 +50,9 @@ LOG_CONSOLE_LEVEL = _get("logging", "console_level", "INFO")
 
 # ── Thumbnails ────────────────────────────────────────────────────────────────
 THUMBNAIL_CACHE_SIZE = _get("thumbnails", "lru_cache_size", 256)
+
+# ── Asset paths ───────────────────────────────────────────────────────────────
+ICONS_DIR = Path(__file__).parent / "icons"
 
 # ── Maya internal identifiers (not user-editable — must not change) ───────────
 SETTINGS_KEY = "ControlMe"

@@ -192,19 +192,6 @@ class TestColor:
 
         mock.setAttr.assert_not_called()
 
-    def test_reset_color_disables_override(self):
-        """reset_color must set overrideEnabled=False for each shape."""
-        from app.core.control import Control
-
-        mock = _cmds(listRelatives=["shapeX"])
-        ctrl = Control(name="my_ctrl")
-
-        with patch("app.core.control.cmds", mock):
-            ctrl.reset_color()
-
-        mock.setAttr.assert_called_once_with("shapeX.overrideEnabled", False)
-
-
 # ---------------------------------------------------------------------------
 # Control.get_bounding_box / get_dimensions / get_scale_factor
 # ---------------------------------------------------------------------------
@@ -283,26 +270,3 @@ class TestToDict:
         assert d["cv_count"] == 2
 
 
-# ---------------------------------------------------------------------------
-# Control.from_selection
-# ---------------------------------------------------------------------------
-
-class TestFromSelection:
-    def test_raises_when_nothing_selected(self):
-        from app.core.control import Control
-
-        mock = _cmds(ls=[])
-
-        with patch("app.core.control.cmds", mock):
-            with pytest.raises(RuntimeError, match="Nothing selected"):
-                Control.from_selection()
-
-    def test_returns_control_wrapping_first_node(self):
-        from app.core.control import Control
-
-        mock = _cmds(ls=["leg_CTRL", "arm_CTRL"])
-
-        with patch("app.core.control.cmds", mock):
-            ctrl = Control.from_selection()
-
-        assert ctrl.name == "leg_CTRL"

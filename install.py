@@ -1,26 +1,20 @@
 """
 ControlMe — drag-and-drop installer for Maya.
 
-.. deprecated:: 1.4.0
-    This installer is superseded by ``install_module.py``, which installs
-    ControlMe as a proper Maya module (.mod) and auto-creates the shelf
-    button on every Maya startup without any userSetup.py editing::
+Drag this file into Maya's viewport. Maya calls ``onMayaDroppedPythonFile``
+automatically, which installs ControlMe as a proper Maya module:
 
-        python install_module.py              # auto-detects Maya version
-        python install_module.py --maya 2025
+    ~/Documents/maya/<version>/modules/
+        ControlMe.mod
+        ControlMe/
+            app/  config.toml  scripts/  icons/
 
-    This file is kept for backwards compatibility and will be removed in a
-    future release.
-
-Drag this file into Maya's viewport to install the ControlMe.
-Maya will call ``onMayaDroppedPythonFile`` automatically.
-
-Running this script outside Maya prints a friendly error and exits.
+Re-running is safe — it overwrites in place. See ``install_module.py``
+for the CLI equivalent.
 """
 
 import os
 import sys
-import shutil
 
 
 def onMayaDroppedPythonFile(obj):  # noqa: N802
@@ -35,103 +29,94 @@ def _install():
     except ImportError:
         print("=" * 60)
         print("  ControlMe — Installer")
-        print("=" * 60)
         print("  This installer must be run inside Maya.")
         print("  Drag install.py into the Maya viewport to install.")
         print("=" * 60)
         return
 
     src_dir = os.path.dirname(os.path.abspath(__file__))
-    install_dir = cmds.internalVar(userScriptDir=True) + "maya-control-tools/"
+    # Make the shared installer helpers importable when this file is
+    # loaded via Maya's drag-and-drop.
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    from module.installer import (
+        copy_package,
+        modules_dir,
+        read_app_version,
+        write_mod_file,
+    )
 
-    print("ControlMe: installing to {} ...".format(install_dir))
+    maya_version = cmds.about(version=True)
+    modules = modules_dir(maya_version)
+    install_dir = os.path.join(modules, "ControlMe")
+    version = read_app_version(src_dir)
 
-    _copy_files(src_dir, install_dir)
-    _copy_icon(src_dir, cmds)
-    _setup_usersetup(install_dir)
+    print("ControlMe: installing v{} → {}".format(version, install_dir))
+    copy_package(src_dir, install_dir)
+    mod_path = write_mod_file(install_dir, modules, version)
 
+    # Put the install on sys.path for this Maya session so the shelf
+    # button works immediately, without needing a restart.
     if install_dir not in sys.path:
         sys.path.insert(0, install_dir)
 
-    _create_shelf_button(install_dir, cmds, mel)
+    _create_shelf_button(cmds, mel)
 
     cmds.confirmDialog(
         title="ControlMe Installed",
         message=(
-            "ControlMe installed successfully!\n\n"
-            "Location:\n{}\n\n"
+            "ControlMe v{} installed.\n\n"
+            "Module : {}\n"
+            ".mod   : {}\n\n"
             "A shelf button has been added to the active shelf.\n"
-            "Restart Maya so the path is registered on startup."
-        ).format(install_dir),
+            "Restart Maya so the module loads on every startup."
+        ).format(version, install_dir, mod_path),
         button=["OK"],
         defaultButton="OK",
     )
     print("ControlMe: installation complete.")
 
 
-def _copy_files(src_dir, install_dir):
-    """Copy app/ into install_dir, updating any existing files cleanly."""
-    src_app = os.path.join(src_dir, "app")
-    dst_app = os.path.join(install_dir, "app")
-    shutil.copytree(src_app, dst_app, dirs_exist_ok=True)
-
-
-def _copy_icon(src_dir, cmds):
-    """Copy controls_tool.png to Maya's userBitmapsDir."""
-    src_icon = os.path.join(src_dir, "app", "icons", "controls_tool.png")
-    if not os.path.exists(src_icon):
-        print("ControlMe: icon not found at {}, skipping.".format(src_icon))
-        return
-    bitmaps_dir = cmds.internalVar(userBitmapsDir=True)
-    os.makedirs(bitmaps_dir, exist_ok=True)
-    shutil.copy2(src_icon, os.path.join(bitmaps_dir, "controls_tool.png"))
-
-
-def _setup_usersetup(install_dir):
-    """Append a sys.path entry to userSetup.py (idempotent — never duplicates)."""
-    marker = "# ControlMe"
-    path_str = install_dir.replace("\\", "/").rstrip("/")
-    line = 'import sys; sys.path.insert(0, r"{}")  {}'.format(path_str, marker)
-
-    usersetup = os.path.join(
-        os.path.expanduser("~"), "Documents", "maya", "scripts", "userSetup.py"
-    )
-    os.makedirs(os.path.dirname(usersetup), exist_ok=True)
-
-    if os.path.exists(usersetup):
-        with open(usersetup, "r", encoding="utf-8") as fh:
-            if marker in fh.read():
-                return  # already registered
-
-    with open(usersetup, "a", encoding="utf-8") as fh:
-        fh.write("\n{}\n".format(line))
-
-
-# Command string embedded in the shelf button — runs when the user clicks it.
-# Uses show_as_workspace_control so the panel is properly dockable in Maya.
-_LAUNCH_TEMPLATE = (
-    "import sys\n"
-    '_p = r"{path}"\n'
-    "if _p not in sys.path: sys.path.insert(0, _p)\n"
+# Same launch command the module's userSetup.py uses — the .mod file
+# puts the package on sys.path, so no install_dir argument is needed.
+_LAUNCH_CMD = (
     "from app.views.main_view import show_as_workspace_control\n"
-    "show_as_workspace_control(install_dir=_p)\n"
+    "show_as_workspace_control()\n"
 )
+_MARKER = "ControlMe"
 
 
-def _create_shelf_button(install_dir, cmds, mel):
-    """Add a shelf button on the currently active Maya shelf tab."""
-    path_str = install_dir.replace("\\", "/").rstrip("/")
-    launch_cmd = _LAUNCH_TEMPLATE.format(path=path_str)
-
+def _create_shelf_button(cmds, mel):
+    """Add or refresh a ControlMe shelf button on the active shelf."""
     top = mel.eval("$t=$gShelfTopLevel")
     shelf = cmds.tabLayout(top, q=True, selectTab=True)
+
+    # If a button with our marker already exists on this shelf, update it
+    # in place rather than creating a duplicate.
+    for btn in cmds.shelfLayout(shelf, q=True, childArray=True) or []:
+        try:
+            annotation = cmds.shelfButton(btn, q=True, annotation=True) or ""
+        except Exception:
+            continue
+        if annotation == _MARKER:
+            cmds.shelfButton(
+                btn,
+                e=True,
+                label="ControlMe",
+                image="controls_tool.png",
+                annotation=_MARKER,
+                sourceType="python",
+                command=_LAUNCH_CMD,
+            )
+            return
+
     cmds.shelfButton(
         parent=shelf,
-        label="Controls",
+        label="ControlMe",
         image="controls_tool.png",
-        annotation="ControlMe \u2014 open control shape manager",
+        annotation=_MARKER,
         sourceType="python",
-        command=launch_cmd,
+        command=_LAUNCH_CMD,
     )
 
 

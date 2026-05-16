@@ -20,6 +20,10 @@ from app.config import LOG_MAX_BYTES, LOG_BACKUP_COUNT, LOG_FILE_LEVEL, LOG_CONS
 
 # Public logger — use this everywhere.
 log = logging.getLogger("controlme")
+# Do NOT propagate to the root logger. Maya attaches its own handler to root
+# that prints everything to the Script Editor regardless of level, which would
+# leak our DEBUG messages even though our own console handler is at INFO.
+log.propagate = False
 
 
 # ---------------------------------------------------------------------------

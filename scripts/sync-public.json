@@ -1,0 +1,42 @@
+{
+  "public_root": "C:\\repos\\maya-control-tools",
+  "copy_dirs": [
+    "app",
+    "tests",
+    "module",
+    "scripts",
+    "docs/screenshots"
+  ],
+  "copy_files": [
+    "main.py",
+    "install.py",
+    "install_module.py",
+    "uninstall.py",
+    "config.toml",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+    ".gitignore",
+    ".github/workflows/test-maya-versions.yml"
+  ],
+  "exclude_patterns": [
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".coverage",
+    "coverage.xml",
+    ".pyc",
+    ".pyo",
+    "_originals_backup"
+  ],
+  "private_paths": [
+    ".claude",
+    ".cursor",
+    ".opencode",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "memory",
+    "logs",
+    "sync-public.json"
+  ]
+}
