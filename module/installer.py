@@ -40,6 +40,16 @@ def modules_dir(maya_version: str) -> str:
     return os.path.join(maya_app_dir(), maya_version, "modules")
 
 
+def global_modules_dir() -> str:
+    """Return the version-independent modules folder.
+
+    Maya reads ``<MAYA_APP_DIR>/modules`` for *every* installed version, so a
+    module placed here loads regardless of which Maya the user launches — the
+    default target for a global ControlMe install.
+    """
+    return os.path.join(maya_app_dir(), "modules")
+
+
 def find_maya_versions() -> List[str]:
     """Return Maya versions found under the user app dir, sorted ascending."""
     root = maya_app_dir()
@@ -148,3 +158,31 @@ def remove_module(install_dir: str, mod_file: str) -> None:
             os.remove(mod_file)
         except OSError:
             pass
+
+
+def remove_controlme_from(modules: str) -> bool:
+    """Remove a ControlMe install from a given modules folder. Idempotent.
+
+    Returns True when a ``ControlMe`` folder or ``ControlMe.mod`` was present
+    (and is now gone), False when there was nothing to remove.
+    """
+    install_dir = os.path.join(modules, "ControlMe")
+    mod_file = os.path.join(modules, "ControlMe.mod")
+    existed = os.path.isdir(install_dir) or os.path.isfile(mod_file)
+    remove_module(install_dir, mod_file)
+    return existed
+
+
+def purge_per_version_installs() -> List[str]:
+    """Remove ControlMe from every per-version modules folder.
+
+    Used when installing globally so Maya never loads two ControlMe modules
+    (one per-version, one global). Returns the modules folders that actually
+    held an install.
+    """
+    removed: List[str] = []
+    for version in find_maya_versions():
+        modules = modules_dir(version)
+        if remove_controlme_from(modules):
+            removed.append(modules)
+    return removed

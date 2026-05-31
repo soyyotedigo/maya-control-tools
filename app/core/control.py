@@ -84,6 +84,25 @@ class Control:
     def get_shapes(self) -> list:
         return cmds.listRelatives(self.name, shapes=True) or []
 
+    def get_curve_shapes(self) -> list:
+        """Non-intermediate nurbsCurve shapes only.
+
+        Serialization must ignore intermediate "Orig" shapes left behind by
+        deformer history, otherwise the saved shape count won't match what a
+        snapshot restore sees (it only ever touches deformable curve shapes).
+        """
+        shapes = cmds.listRelatives(self.name, shapes=True, type="nurbsCurve",
+                                    fullPath=True) or []
+        keep = []
+        for sh in shapes:
+            try:
+                if cmds.getAttr(f"{sh}.intermediateObject"):
+                    continue
+            except Exception:
+                pass
+            keep.append(sh)
+        return keep
+
     def get_bounding_box(self) -> tuple:
         return cmds.exactWorldBoundingBox(self.name)
 
@@ -131,29 +150,37 @@ class Control:
             return [tuple(cmds.xform(cv, query=True, worldSpace=True, translation=True))
                     for cv in cvs]
 
-    def get_all_shapes_data(self) -> list:
+    def get_all_shapes_data(self, space: str = "world") -> list:
         """Return a list of dicts, one per NurbsCurve shape under this transform.
 
         Each dict has: cv_positions (list of (x,y,z)), degree (int), knots (list).
+
+        ``space`` controls the coordinate frame CVs are returned in:
+        ``"world"`` (default, back-compat) or ``"object"`` (local to the
+        transform). Snapshots use object space so loads restore a shape
+        glued to the target's current TRS without visual drift.
 
         Uses openMaya API 2.0 (MFnNurbsCurve) for bulk CV + knot reads.
         Falls back to cmds in standalone/mock mode.
         """
         result = []
-        for shape in self.get_shapes():
+        for shape in self.get_curve_shapes():
             try:
                 from maya.api import OpenMaya as om
                 sel = om.MSelectionList()
                 sel.add(shape)
                 fn = om.MFnNurbsCurve(sel.getDagPath(0))
-                cv_pos = [(p.x, p.y, p.z) for p in fn.cvPositions(om.MSpace.kWorld)]
+                mspace = om.MSpace.kObject if space == "object" else om.MSpace.kWorld
+                cv_pos = [(p.x, p.y, p.z) for p in fn.cvPositions(mspace)]
                 degree = fn.degree
                 knots  = list(fn.knots())           # actual stored knot vector
                 form   = cmds.getAttr(f"{shape}.form")
             except Exception:
                 cvs = cmds.ls(f"{shape}.cv[*]", flatten=True)
+                xform_kwargs = ({"objectSpace": True} if space == "object"
+                                else {"worldSpace": True})
                 cv_pos = [
-                    tuple(cmds.xform(cv, query=True, worldSpace=True, translation=True))
+                    tuple(cmds.xform(cv, query=True, translation=True, **xform_kwargs))
                     for cv in cvs
                 ]
                 degree = cmds.getAttr(f"{shape}.degree")

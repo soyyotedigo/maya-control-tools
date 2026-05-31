@@ -4,8 +4,8 @@ ControlMe — drag-and-drop uninstaller for Maya.
 Drag this file into Maya's viewport. Maya calls ``onMayaDroppedPythonFile``
 which removes:
 
-    * ~/Documents/maya/<version>/modules/ControlMe/         (module folder)
-    * ~/Documents/maya/<version>/modules/ControlMe.mod      (mod file)
+    * ~/Documents/maya/modules/ControlMe(.mod)              (global install)
+    * ~/Documents/maya/<version>/modules/ControlMe(.mod)    (per-version installs)
     * any ControlMe shelf button on any shelf
     * the legacy ``# ControlMe`` line that older install.py versions wrote
       into ``~/Documents/maya/scripts/userSetup.py``
@@ -37,34 +37,42 @@ def _uninstall():
     src_dir = os.path.dirname(os.path.abspath(__file__))
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
-    from module.installer import modules_dir, remove_module
+    from module.installer import (
+        find_maya_versions,
+        global_modules_dir,
+        modules_dir,
+        remove_controlme_from,
+    )
 
-    maya_version = cmds.about(version=True)
-    modules = modules_dir(maya_version)
-    install_dir = os.path.join(modules, "ControlMe")
-    mod_file = os.path.join(modules, "ControlMe.mod")
+    # Every place an install could live: the global modules dir plus each
+    # per-version one.
+    targets = [global_modules_dir()]
+    targets += [modules_dir(v) for v in find_maya_versions()]
+    found = [m for m in targets
+             if os.path.isdir(os.path.join(m, "ControlMe"))
+             or os.path.isfile(os.path.join(m, "ControlMe.mod"))]
 
-    if not os.path.isdir(install_dir) and not os.path.isfile(mod_file):
+    if not found:
         cmds.confirmDialog(
             title="ControlMe Uninstaller",
             message=(
-                "Nothing to uninstall — no ControlMe module found at:\n{}\n\n"
+                "Nothing to uninstall — no ControlMe module found in the "
+                "global or per-version modules folders.\n\n"
                 "Shelf buttons and legacy userSetup.py entries will still be "
                 "cleaned up."
-            ).format(install_dir),
+            ),
             button=["OK"],
             defaultButton="OK",
         )
 
+    locations = "\n".join("  • {}".format(m) for m in found) or "  • (none)"
     confirm = cmds.confirmDialog(
         title="Uninstall ControlMe?",
         message=(
-            "This will remove:\n"
-            "  • {}\n"
-            "  • {}\n"
-            "  • any ControlMe shelf button\n"
-            "  • the legacy ControlMe line in userSetup.py (if present)"
-        ).format(install_dir, mod_file),
+            "This will remove the ControlMe module from:\n{}\n\n"
+            "…plus any ControlMe shelf button and the legacy ControlMe line "
+            "in userSetup.py (if present)."
+        ).format(locations),
         button=["Uninstall", "Cancel"],
         defaultButton="Cancel",
         cancelButton="Cancel",
@@ -74,7 +82,7 @@ def _uninstall():
         print("ControlMe: uninstall cancelled.")
         return
 
-    remove_module(install_dir, mod_file)
+    removed_locations = sum(1 for m in targets if remove_controlme_from(m))
     removed_buttons = _remove_shelf_buttons(cmds, mel)
     removed_usersetup = _clean_legacy_usersetup()
 
@@ -82,11 +90,12 @@ def _uninstall():
         title="ControlMe Uninstalled",
         message=(
             "Removed:\n"
-            "  • module folder + .mod file\n"
+            "  • module folder + .mod file from {} location(s)\n"
             "  • {} shelf button(s)\n"
             "  • legacy userSetup.py line: {}\n\n"
             "Restart Maya so the .mod file fully unloads."
-        ).format(removed_buttons, "yes" if removed_usersetup else "n/a"),
+        ).format(removed_locations, removed_buttons,
+                 "yes" if removed_usersetup else "n/a"),
         button=["OK"],
         defaultButton="OK",
     )

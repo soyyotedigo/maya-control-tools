@@ -29,7 +29,7 @@ QPushButton:disabled {
 }
 
 QListWidget {
-    background: #232323;
+    background: #2b2b2b;
     border: 1px solid #444;
     alternate-background-color: #2a2a2a;
 }
@@ -44,7 +44,7 @@ QListWidget::item:hover {
 }
 
 QLineEdit {
-    background: #232323;
+    background: #2b2b2b;
     border: 1px solid #555;
     border-radius: 2px;
     padding: 2px 4px;
@@ -77,7 +77,7 @@ QSlider {
 }
 
 QSlider::groove:horizontal {
-    background: #1a1a1a;
+    background: #2b2b2b;
     height: 4px;
     border-radius: 2px;
 }
@@ -96,7 +96,7 @@ QSlider::sub-page:horizontal {
 }
 
 QSplitter::handle {
-    background: #1a1a1a;
+    background: #2b2b2b;
 }
 
 QSplitter::handle:horizontal {
@@ -105,7 +105,7 @@ QSplitter::handle:horizontal {
 
 QMenuBar {
     background: #2b2b2b;
-    border-bottom: 1px solid #1a1a1a;
+    border-bottom: 1px solid #2b2b2b;
 }
 
 QMenuBar::item:selected {
@@ -129,7 +129,7 @@ QMenu::separator {
 }
 
 QScrollBar:vertical {
-    background: #232323;
+    background: #2b2b2b;
     width: 8px;
     border: none;
 }
@@ -150,7 +150,7 @@ QScrollBar::sub-line:vertical {
 }
 
 QScrollBar:horizontal {
-    background: #232323;
+    background: #2b2b2b;
     height: 8px;
     border: none;
 }
@@ -175,7 +175,7 @@ QLabel {
 }
 
 QGroupBox {
-    background: #232323;
+    background: #2b2b2b;
     border: 1px solid #444;
     border-radius: 2px;
     margin-top: 10px;
@@ -188,11 +188,11 @@ QGroupBox::title {
     left: 8px;
     padding: 0 4px;
     color: #888;
-    background: #232323;
+    background: #2b2b2b;
 }
 
 QSpinBox {
-    background: #232323;
+    background: #2b2b2b;
     border: 1px solid #555;
     border-radius: 2px;
     padding: 2px 4px;

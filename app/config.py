@@ -36,7 +36,7 @@ def _get(section: str, key: str, default):
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
-VERSION = _get("app", "version", "1.10.3")
+VERSION = _get("app", "version", "1.10.4")
 WINDOW_TITLE = _get("app", "window_title", "ControlMe")
 AUTHOR = _get("app", "author", "Cesar Daniel Franco")
 MIN_WIDTH = _get("app", "min_width", 500)

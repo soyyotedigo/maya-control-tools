@@ -1,13 +1,14 @@
 """
 ControlMe — Maya module installer (CLI).
 
-Copies the repo into ``~/maya/<version>/modules/`` and writes a ``.mod``
-file so Maya auto-adds the tool to ``sys.path`` and creates the shelf
-button on every startup.
+By default installs into the version-independent ``~/maya/modules/`` (or
+``~/Documents/maya/modules/`` on Windows) and writes a ``.mod`` file, so
+Maya auto-adds the tool to ``sys.path`` and creates the shelf button on
+every startup — for all installed Maya versions at once.
 
 Usage:
-    python install_module.py              # auto-detects newest Maya version
-    python install_module.py --maya 2025
+    python install_module.py              # global install (all Maya versions)
+    python install_module.py --maya 2025  # per-version install instead
 
 Safe to re-run — overwrites files in place.
 """
@@ -24,8 +25,9 @@ if _HERE not in sys.path:
 
 from module.installer import (
     copy_package,
-    find_maya_versions,
+    global_modules_dir,
     modules_dir,
+    purge_per_version_installs,
     read_app_version,
     write_mod_file,
 )
@@ -36,21 +38,21 @@ def install(maya_version: str | None = None, src_dir: str | None = None) -> None
         src_dir = _HERE
 
     if maya_version is None:
-        versions = find_maya_versions()
-        if not versions:
-            sys.exit(
-                "ERROR: No Maya version folders found under the Maya app dir.\n"
-                "Pass --maya <version> explicitly, e.g.:\n"
-                "  python install_module.py --maya 2025"
-            )
-        maya_version = versions[-1]
-        print(f"Auto-detected Maya version: {maya_version}")
+        # Global, version-independent install. Drop any older per-version
+        # copies so Maya never loads two ControlMe modules.
+        modules = global_modules_dir()
+        removed = purge_per_version_installs()
+        if removed:
+            print(f"Removed {len(removed)} older per-version install(s).")
+        print("Target: global modules dir (loads in all Maya versions)")
+    else:
+        modules = modules_dir(maya_version)
+        print(f"Target: Maya {maya_version} (per-version install)")
 
-    modules = modules_dir(maya_version)
     install_dir = os.path.join(modules, "ControlMe")
 
     version = read_app_version(src_dir)
-    print(f"Installing ControlMe v{version} → {install_dir}")
+    print(f"Installing ControlMe v{version} -> {install_dir}")
     copy_package(src_dir, install_dir)
     mod_path = write_mod_file(install_dir, modules, version)
 
@@ -65,7 +67,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--maya",
         metavar="VERSION",
-        help="Maya version to install for (e.g. 2025). Auto-detected when omitted.",
+        help="Install for one Maya version (e.g. 2025) instead of the default "
+             "global, all-versions install.",
     )
     args = parser.parse_args()
     install(args.maya)

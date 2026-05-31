@@ -7,7 +7,7 @@ Maya tool for creating, replacing and managing rig control shapes (NURBS curves)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Maya](https://img.shields.io/badge/Maya-2022%2B-orange)
 ![UI](https://img.shields.io/badge/UI-PySide2%20%7C%20PySide6-green)
-![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-185%20passing-brightgreen)
 
 ---
 
@@ -38,9 +38,13 @@ Comment:
 - **Browse** a library of 13 built-in NURBS primitives — circle, square, triangle, arrow, double arrow, cross, cube, diamond, locator, four arrow, three arrow, octahedron, and cone — with live search and QPainter-rendered previews
 - **Apply** a shape to any selected node in one click
 - **Replace** the shape on an existing control **without losing its connections, pivot, or position** — the hard part of rigging pipeline work
-- **Remove** shapes from a node
+- **Orient** a control's CVs in 90° steps around X / Y / Z (left-click +90°, right-click −90°)
+- **Scale** a control's CVs with a live slider or manual %, gated per object-space axis (X/Y/Z), with an optional **Scale from center** mode that pivots on the control's own centroid instead of its transform pivot
+- **Mirror** a control across X / Y / Z — onto its opposite-side counterpart when an `L`/`R` name match exists (rebuilding the shape when the two sides differ), otherwise flipping its own CVs in place
+- **Remove** shapes from a node, or **duplicate** a library shape
 - **Set color** via RGB override on the shape node
 - **Save custom shapes** from your scene into a local SQLite library that persists between sessions
+- **Snapshot** every NURBS control in the scene to a JSON file and restore the shapes/colors later, in place
 
 ---
 
@@ -63,7 +67,9 @@ Comment:
 4. Click **OK** in the confirmation dialog
 5. Restart Maya — the **ControlMe** shelf button appears automatically
 
-No terminal or Python installation needed.
+Installs into the version-independent `~/Documents/maya/modules/`, so the
+tool loads in **every** Maya version. Any older per-version install is removed
+automatically. No terminal or Python installation needed.
 
 ---
 
@@ -72,14 +78,17 @@ No terminal or Python installation needed.
 Requires Python to be available in your terminal (separate from Maya).
 
 ```bash
-# auto-detects the newest installed Maya version
+# global install — loads in all Maya versions
 python install_module.py
 
-# or specify a version explicitly
+# or install for a single Maya version instead
 python install_module.py --maya 2025
 ```
 
-Installs ControlMe as a proper Maya module (`.mod`) under `~/maya/<version>/modules/` (or `~/Documents/maya/<version>/modules/` on Windows).
+By default installs ControlMe as a proper Maya module (`.mod`) under the
+version-independent `~/maya/modules/` (or `~/Documents/maya/modules/` on
+Windows). Pass `--maya <version>` for a per-version install under
+`~/Documents/maya/<version>/modules/`.
 
 ---
 

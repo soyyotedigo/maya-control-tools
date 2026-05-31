@@ -70,7 +70,9 @@ class ControlPresenter(QtCore.QObject):
         self._scale_drag_session = None  # type: ignore[assignment]
         # Slider value at the last apply tick. Snapshot of "from where" for
         # the next incremental factor.
-        self._scale_drag_last: int = 100
+        # Slider neutral is 0% (= no change); a slider value ``v`` maps to a
+        # scale factor of ``1 + v/100`` relative to the size at drag start.
+        self._scale_drag_last: int = 0
         # Re-entrance guard for the outliner↔image cross-mirror selection.
         self._syncing: bool = False
 
@@ -83,7 +85,6 @@ class ControlPresenter(QtCore.QObject):
         shape: dict,
         replace_name: bool = False,
         replace_color: bool = True,
-        extract_to_mgear: bool = False,
     ) -> int:
         """Replace the shape of every selected Maya control. Returns the
         number of controls actually replaced (0 if nothing selected)."""
@@ -93,7 +94,6 @@ class ControlPresenter(QtCore.QObject):
             shape,
             replace_name=replace_name,
             replace_color=replace_color,
-            extract_to_mgear=extract_to_mgear,
         )
 
     # ------------------------------------------------------------------
@@ -106,12 +106,51 @@ class ControlPresenter(QtCore.QObject):
         return rotate_selected_cvs(axis, degrees)
 
     # ------------------------------------------------------------------
+    # Mirror
+    # ------------------------------------------------------------------
+
+    def mirror_controls(self, axis: str = "x") -> tuple[int, int, int]:
+        """Mirror selected controls across ``axis``. Returns
+        ``(mirrored, flipped, skipped)`` — see ``mirror_selected_controls``."""
+        from app.core.operations import mirror_selected_controls
+
+        return mirror_selected_controls(axis)
+
+    # ------------------------------------------------------------------
+    # Viewport control colour
+    # ------------------------------------------------------------------
+
+    def set_viewport_color(self, rgb: tuple) -> int:
+        """Apply an override colour to every selected viewport control.
+        Returns the number of controls recoloured."""
+        from app.core.operations import set_selected_controls_color
+
+        return set_selected_controls_color(rgb)
+
+    def reset_viewport_color(self) -> int:
+        """Clear the colour override on every selected viewport control.
+        Returns the number of controls reset."""
+        from app.core.operations import reset_selected_controls_color
+
+        return reset_selected_controls_color()
+
+    # ------------------------------------------------------------------
     # Scale — drag session lifecycle
     # ------------------------------------------------------------------
 
-    def scale_drag_start(self, slider_value: int) -> None:
+    def scale_drag_start(
+        self,
+        slider_value: int,
+        axes: str = "xyz",
+        from_center: bool = False,
+    ) -> None:
         """Open a drag session. Captures CV snapshots for the current
-        Maya selection if not already captured."""
+        Maya selection if not already captured.
+
+        ``axes`` selects which object-space axes the drag scales (default
+        ``"xyz"`` = uniform); pass a subset like ``"xz"`` to gate axes.
+        ``from_center`` pivots each control on its own CV centroid.
+        """
         from app.core.operations import (
             ScaleDragSession,
             ensure_snapshots_for_selection,
@@ -119,16 +158,25 @@ class ControlPresenter(QtCore.QObject):
 
         ensure_snapshots_for_selection(self._cv_snapshots)
         self._scale_drag_last = slider_value
-        self._scale_drag_session = ScaleDragSession.start()
+        self._scale_drag_session = ScaleDragSession.start(
+            axes=axes, from_center=from_center,
+        )
 
     def scale_drag_apply(self, slider_value: int) -> None:
         """Apply the incremental factor between ``_scale_drag_last`` and the
-        new slider value. No-op outside an active drag."""
+        new slider value. No-op outside an active drag.
+
+        Slider values are percentage *deltas* (0 = no change), so the factor
+        at value ``v`` is ``1 + v/100`` and the incremental step between two
+        ticks is the ratio of those factors.
+        """
         if self._scale_drag_session is None:
             return
-        if slider_value == self._scale_drag_last or self._scale_drag_last <= 0:
+        prev_factor = 1.0 + self._scale_drag_last / 100.0
+        new_factor = 1.0 + slider_value / 100.0
+        if prev_factor <= 0 or abs(new_factor - prev_factor) < 1e-9:
             return
-        self._scale_drag_session.apply(slider_value / self._scale_drag_last)
+        self._scale_drag_session.apply(new_factor / prev_factor)
         self._scale_drag_last = slider_value
 
     def scale_drag_end(self) -> None:
@@ -136,31 +184,47 @@ class ControlPresenter(QtCore.QObject):
         if self._scale_drag_session is not None:
             self._scale_drag_session.end()
         self._scale_drag_session = None
-        self._scale_drag_last = 100
+        self._scale_drag_last = 0
 
     # ------------------------------------------------------------------
     # Scale — manual + reset
     # ------------------------------------------------------------------
 
-    def scale_apply_manual(self, percent: int) -> int:
-        """Apply a single absolute scale (percent/100). Returns the number
-        of controls scaled — 0 for no selection or identity factor."""
+    def scale_apply_manual(
+        self,
+        percent: int,
+        axes: str = "xyz",
+        from_center: bool = False,
+    ) -> int:
+        """Apply a single scale by ``percent`` *delta* (0 = no change, so the
+        factor is ``1 + percent/100``). Returns the number of controls scaled
+        — 0 for no selection, no change, or an invalid (<= -100%) factor.
+
+        ``axes`` selects which object-space axes are scaled (default
+        ``"xyz"`` = uniform); pass a subset like ``"xz"`` to gate axes.
+        ``from_center`` pivots each control on its own CV centroid.
+        """
         from app.core.operations import (
             ensure_snapshots_for_selection,
             scale_selected_cvs,
         )
 
-        if percent <= 0:
+        factor = 1.0 + percent / 100.0
+        if percent == 0 or factor <= 0:
             return 0
         ensure_snapshots_for_selection(self._cv_snapshots)
-        return scale_selected_cvs(percent / 100.0)
+        return scale_selected_cvs(factor, axes=axes, from_center=from_center)
 
-    def scale_reset(self) -> int:
+    def scale_reset(self, axes: str = "xyz") -> int:
         """Restore selected controls to their captured CV positions.
-        Returns the number of nodes restored (0 if no snapshots)."""
+
+        ``axes`` ``"xyz"`` restores all axes; pass a subset like ``"xz"`` to
+        restore only those object-space components. Returns the number of
+        nodes restored (0 if no snapshots).
+        """
         from app.core.operations import reset_selected_cvs
 
-        return reset_selected_cvs(self._cv_snapshots)
+        return reset_selected_cvs(self._cv_snapshots, axes=axes)
 
     @property
     def has_scale_snapshots(self) -> bool:
@@ -199,3 +263,23 @@ class ControlPresenter(QtCore.QObject):
         the view can re-render outliner + grid in one place."""
         self._svc.import_database(src_path)
         self.library_replaced.emit()
+
+    # ------------------------------------------------------------------
+    # Scene snapshot (save / load all scene controls to a JSON file)
+    # ------------------------------------------------------------------
+
+    def save_scene_snapshot(self, dest_path: str):
+        """Serialize every curve control in the current Maya scene to JSON.
+
+        Returns the ``SaveResult`` from ``scene_snapshot.save_scene_snapshot``
+        so the view can show a result message. Imports lazily — the module
+        touches ``maya.cmds`` at import time and must not load in tests
+        that don't need it.
+        """
+        from app.core.scene_snapshot import save_scene_snapshot
+        return save_scene_snapshot(dest_path)
+
+    def load_scene_snapshot(self, src_path: str):
+        """Restore controls from a snapshot file. Returns ``LoadResult``."""
+        from app.core.scene_snapshot import load_scene_snapshot
+        return load_scene_snapshot(src_path)

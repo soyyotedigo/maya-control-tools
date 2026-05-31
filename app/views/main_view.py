@@ -126,6 +126,9 @@ class ControlMe(QtWidgets.QWidget):
         file_menu = self.menu_bar.addMenu("File")
         self.export_db_action = file_menu.addAction("Export Database…")
         self.import_db_action = file_menu.addAction("Import Database…")
+        file_menu.addSeparator()
+        self.save_scene_ctrls_action = file_menu.addAction("Save Scene Controls…")
+        self.load_scene_ctrls_action = file_menu.addAction("Load Scene Controls…")
 
         help_menu = self.menu_bar.addMenu("Help")
         self.open_log_action = help_menu.addAction("Open Log File")
@@ -170,32 +173,79 @@ class ControlMe(QtWidgets.QWidget):
             btn.setToolTip(_rot_tip.format(ax=ax))
             btn.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
 
+        # Mirror — axis picker + button. Mirrors a control onto its opposite
+        # (L<->R by name) across the chosen world axis, or flips the control's
+        # own CVs in place when no counterpart is found.
+        self.mirror_axis_combo = QtWidgets.QComboBox()
+        self.mirror_axis_combo.addItems(["X", "Y", "Z"])
+        self.mirror_axis_combo.setFixedWidth(48)
+        self.mirror_axis_combo.setToolTip("Axis/plane to mirror across.")
+        self.mirror_btn = QtWidgets.QPushButton("Mirror")
+        self.mirror_btn.setToolTip(
+            "Mirror the selected control(s) across the chosen axis.\n"
+            "If an opposite-side control exists (L<->R by name), its shape is\n"
+            "mirrored onto it; otherwise the control's own CVs are flipped in\n"
+            "place. Object connections are preserved."
+        )
+
         # Scale controls — horizontal slider + spinbox in the Settings panel.
         # Slider applies CV-scale live during drag (one undo chunk per gesture)
         # and snaps back to 100% on release. Spinbox accepts a manual % and
         # applies on Enter, then also snaps back to 100%.
+        # The slider is centred on 0% = no change. Negative values shrink the
+        # control, positive values grow it, both relative to the size at the
+        # start of the drag. Releases snap back to 0%.
         self.scale_slider = _JumpToClickSlider(QtCore.Qt.Horizontal)
-        self.scale_slider.setRange(10, 300)
-        self.scale_slider.setValue(100)
+        self.scale_slider.setRange(-90, 200)
+        self.scale_slider.setValue(0)
         self.scale_slider.setTickPosition(QtWidgets.QSlider.NoTicks)
         self.scale_slider.setSingleStep(1)
         self.scale_slider.setPageStep(20)
         self.scale_slider.setToolTip(
-            "Drag to scale selected controls live (one Ctrl+Z per drag).\n"
-            "Click on the track for a quick one-shot scale to that value.\n"
-            "Releases snap back to 100%. Range: 10%–300%."
+            "Drag to scale selected controls relative to their current size\n"
+            "(one Ctrl+Z per drag). 0% = no change, negative shrinks, positive\n"
+            "grows. Releases snap back to 0%. Range set by the min/max fields."
+        )
+
+        # Slider range — two int-only fields setting the slider's min / max.
+        # They flank the slider in the layout below. Min is the negative
+        # (shrink) end; max is the positive (grow) end, so 0% always sits
+        # inside the range.
+        self.scale_min_spin = QtWidgets.QSpinBox()
+        self.scale_min_spin.setRange(-99, -1)
+        self.scale_min_spin.setValue(-90)
+        self.scale_min_spin.setSuffix(" %")
+        self.scale_min_spin.setAlignment(QtCore.Qt.AlignCenter)
+        self.scale_min_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        self.scale_min_spin.setFixedWidth(52)
+        self.scale_min_spin.setToolTip(
+            "Slider minimum — the most you can shrink (negative %).\n"
+            "Left end of the scale slider's range."
+        )
+
+        self.scale_max_spin = QtWidgets.QSpinBox()
+        self.scale_max_spin.setRange(1, 10000)
+        self.scale_max_spin.setValue(200)
+        self.scale_max_spin.setSuffix(" %")
+        self.scale_max_spin.setAlignment(QtCore.Qt.AlignCenter)
+        self.scale_max_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        self.scale_max_spin.setFixedWidth(52)
+        self.scale_max_spin.setToolTip(
+            "Slider maximum — the most you can grow (positive %).\n"
+            "Right end of the scale slider's range."
         )
 
         self.scale_spin = QtWidgets.QSpinBox()
-        self.scale_spin.setRange(1, 10000)
-        self.scale_spin.setValue(100)
+        self.scale_spin.setRange(-99, 10000)
+        self.scale_spin.setValue(0)
         self.scale_spin.setSuffix(" %")
         self.scale_spin.setAlignment(QtCore.Qt.AlignCenter)
         self.scale_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.scale_spin.setFixedWidth(64)
         self.scale_spin.setToolTip(
-            "Type a percentage and press Enter to scale by that amount.\n"
-            "100% = no change. After applying, the field snaps back to 100%."
+            "Type a % change and press Enter to scale by that amount.\n"
+            "0% = no change, negative shrinks, positive grows.\n"
+            "After applying, the field snaps back to 0%."
         )
 
         self.scale_reset_btn = QtWidgets.QPushButton("R")
@@ -203,6 +253,44 @@ class ControlMe(QtWidgets.QWidget):
         self.scale_reset_btn.setToolTip(
             "Reset selected controls to their original CV size.\n"
             "Original positions are captured the first time you scale a control."
+        )
+
+        # Axis gates — the single scale slider/spinbox/reset above act only on
+        # the object-space axes whose checkbox is ticked. All on by default,
+        # so the slider behaves as a uniform scale until the user narrows it.
+        self.scale_axis_cbs = {}
+        for ax in ("x", "y", "z"):
+            cb = QtWidgets.QCheckBox(ax.upper())
+            cb.setChecked(True)
+            cb.setToolTip(
+                f"Include the {ax.upper()} axis when scaling.\n"
+                "Untick to leave this axis unchanged; the slider and reset\n"
+                "then only affect the ticked axes."
+            )
+            self.scale_axis_cbs[ax] = cb
+
+        # Scale-from-center gate — when ticked, each control scales about the
+        # centroid of its own CVs instead of its transform pivot, so the shape
+        # resizes in place even if the pivot sits off-shape.
+        self.scale_center_cb = QtWidgets.QCheckBox("Scale from center")
+        self.scale_center_cb.setToolTip(
+            "Scale each control around the centroid of its CVs instead of its\n"
+            "transform pivot, so the shape grows/shrinks in place."
+        )
+
+        # Viewport control colour — applies an override colour to every control
+        # selected in the Maya viewport (distinct from the toolbar swatch, which
+        # recolours the library item). Picking a colour applies it immediately.
+        self.viewport_color_swatch = ColorSwatch()
+        self.viewport_color_swatch.setToolTip(
+            "Pick a colour to apply to ALL controls selected in the Maya\n"
+            "viewport. Recolours the live controls, not the library item."
+        )
+        self.viewport_color_reset_btn = QtWidgets.QPushButton("R")
+        self.viewport_color_reset_btn.setFixedSize(26, 24)
+        self.viewport_color_reset_btn.setToolTip(
+            "Clear the colour override on the selected viewport controls,\n"
+            "restoring their default (layer/draw) colour."
         )
 
         # Replace-on-apply checkboxes — stored in QSettings so they survive
@@ -225,29 +313,6 @@ class ControlMe(QtWidgets.QWidget):
             "control. When unchecked, the original scene color is preserved."
         )
 
-        # Optional mGear integration: after replacing the control, run mGear's
-        # "Extract Controls" so the matching guide stores the new shape and
-        # the next rig rebuild picks it up. Disabled when mGear isn't found.
-        from app.core.mgear_integration import is_available as _mgear_available
-        self.extract_mgear_cb = QtWidgets.QCheckBox("Extract to mgear")
-        self.extract_mgear_cb.setIcon(QtGui.QIcon(str(ICONS_DIR / "replace_mgear_control.png")))
-        self.extract_mgear_cb.setIconSize(_cb_icon_size)
-        _mgear_tooltip = (
-            "After replacing the control, run mGear's 'Extract Controls' so\n"
-            "the matching guide is updated with the new shape. The next rig\n"
-            "rebuild will pick it up automatically.\n\n"
-            "Requires mGear Framework to be installed."
-        )
-        if _mgear_available():
-            self.extract_mgear_cb.setToolTip(_mgear_tooltip)
-        else:
-            self.extract_mgear_cb.setEnabled(False)
-            self.extract_mgear_cb.setChecked(False)
-            self.extract_mgear_cb.setToolTip(
-                _mgear_tooltip
-                + "\n\nDisabled: mGear was not found on the Python path."
-            )
-
         # Control Settings group — scale row + replace-options row.
         self.settings_group = QtWidgets.QGroupBox("Control Settings")
         settings_layout = QtWidgets.QVBoxLayout(self.settings_group)
@@ -257,9 +322,30 @@ class ControlMe(QtWidgets.QWidget):
         scale_row = QtWidgets.QHBoxLayout()
         scale_row.setSpacing(6)
         scale_row.addWidget(QtWidgets.QLabel("Scale"))
+        scale_row.addWidget(self.scale_min_spin)
         scale_row.addWidget(self.scale_slider, 1)
+        scale_row.addWidget(self.scale_max_spin)
         scale_row.addWidget(self.scale_spin)
         scale_row.addWidget(self.scale_reset_btn)
+
+        # Axis row — checkboxes gating which axes the scale slider acts on,
+        # plus the scale-from-center toggle.
+        axis_row = QtWidgets.QHBoxLayout()
+        axis_row.setSpacing(8)
+        axis_row.addWidget(QtWidgets.QLabel("Axes"))
+        for ax in ("x", "y", "z"):
+            axis_row.addWidget(self.scale_axis_cbs[ax])
+        axis_row.addSpacing(12)
+        axis_row.addWidget(self.scale_center_cb)
+        axis_row.addStretch()
+
+        # Viewport control colour — swatch + reset for the live selection.
+        vp_color_row = QtWidgets.QHBoxLayout()
+        vp_color_row.setSpacing(6)
+        vp_color_row.addWidget(QtWidgets.QLabel("Control color"))
+        vp_color_row.addWidget(self.viewport_color_swatch)
+        vp_color_row.addWidget(self.viewport_color_reset_btn)
+        vp_color_row.addStretch()
 
         # Vertical stack: header row + one row per option (checkbox on the
         # left, detailed description on the right). Description column
@@ -284,10 +370,6 @@ class ControlMe(QtWidgets.QWidget):
                 self.replace_color_cb,
                 "Apply the library shape's color. Unchecked: keep the current scene color.",
             ),
-            (
-                self.extract_mgear_cb,
-                "After replacing, run mGear's Extract Controls so the matching guide is updated.",
-            ),
         ], start=1):
             replace_grid.addWidget(cb, row, 0)
             descr_label = QtWidgets.QLabel(descr)
@@ -296,6 +378,8 @@ class ControlMe(QtWidgets.QWidget):
             replace_grid.addWidget(descr_label, row, 1)
 
         settings_layout.addLayout(scale_row)
+        settings_layout.addLayout(axis_row)
+        settings_layout.addLayout(vp_color_row)
         settings_layout.addLayout(replace_grid)
 
         # Right pane container: previews on top, scale panel flush below.
@@ -337,6 +421,10 @@ class ControlMe(QtWidgets.QWidget):
         toolbar.addWidget(self.rot_x_btn)
         toolbar.addWidget(self.rot_y_btn)
         toolbar.addWidget(self.rot_z_btn)
+        toolbar.addSpacing(12)
+        toolbar.addWidget(QtWidgets.QLabel("Mirror:"))
+        toolbar.addWidget(self.mirror_axis_combo)
+        toolbar.addWidget(self.mirror_btn)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.duplicate_btn)
         toolbar.addWidget(self.remove_btn)
@@ -420,15 +508,26 @@ class ControlMe(QtWidgets.QWidget):
             lambda _: self._rotate_cvs("z", -90)
         )
 
+        # Mirror selected controls across the chosen axis.
+        self.mirror_btn.clicked.connect(self._mirror_controls)
+
         # Scale controls (CV-level scale of selected Maya controls)
         # Slider: pressed → open undo chunk, valueChanged → apply incremental
-        # factor, released → close chunk + snap back to 100%.
+        # factor, released → close chunk + snap back to 100%. The X/Y/Z axis
+        # checkboxes gate which object-space axes every scale gesture touches.
         self.scale_slider.sliderPressed.connect(self._scale_slider_pressed)
         self.scale_slider.valueChanged.connect(self._scale_slider_changed)
         self.scale_slider.sliderReleased.connect(self._scale_slider_released)
         # returnPressed (not editingFinished) so focus loss does not apply.
         self.scale_spin.lineEdit().returnPressed.connect(self._scale_apply_manual)
         self.scale_reset_btn.clicked.connect(self._scale_reset)
+        # Min/max fields drive the slider's range live.
+        self.scale_min_spin.valueChanged.connect(self._update_scale_range)
+        self.scale_max_spin.valueChanged.connect(self._update_scale_range)
+
+        # Viewport control colour — pick applies live, R clears the override.
+        self.viewport_color_swatch.color_changed.connect(self._set_viewport_color)
+        self.viewport_color_reset_btn.clicked.connect(self._reset_viewport_color)
 
         # Color
         self.image_view.color_picked.connect(self._set_color)
@@ -438,6 +537,8 @@ class ControlMe(QtWidgets.QWidget):
         # Menu bar
         self.export_db_action.triggered.connect(self._export_db)
         self.import_db_action.triggered.connect(self._import_db)
+        self.save_scene_ctrls_action.triggered.connect(self._save_scene_controls)
+        self.load_scene_ctrls_action.triggered.connect(self._load_scene_controls)
         self.open_log_action.triggered.connect(self._open_log)
         self.about_action.triggered.connect(self._show_about)
 
@@ -447,7 +548,8 @@ class ControlMe(QtWidgets.QWidget):
         self.image_view.projection_combo.currentTextChanged.connect(self._save_settings)
         self.replace_name_cb.toggled.connect(self._save_settings)
         self.replace_color_cb.toggled.connect(self._save_settings)
-        self.extract_mgear_cb.toggled.connect(self._save_settings)
+        self.scale_center_cb.toggled.connect(self._save_settings)
+        self.mirror_axis_combo.currentTextChanged.connect(self._save_settings)
 
     # ------------------------------------------------------------------
     # Data
@@ -656,7 +758,6 @@ class ControlMe(QtWidgets.QWidget):
             shape,
             replace_name=self.replace_name_cb.isChecked(),
             replace_color=self.replace_color_cb.isChecked(),
-            extract_to_mgear=self.extract_mgear_cb.isChecked(),
         ) == 0:
             QtWidgets.QMessageBox.warning(
                 self,
@@ -677,23 +778,95 @@ class ControlMe(QtWidgets.QWidget):
         if self._presenter.rotate_cvs(axis, degrees) == 0:
             log.debug("_rotate_cvs: nothing selected")
 
+    def _mirror_controls(self) -> None:
+        """Mirror selected controls across the axis chosen in the combo.
+
+        Opposite-side (L<->R) controls get the mirrored shape; controls with
+        no counterpart are flipped in place. Reports skips (ambiguous name or
+        topology mismatch) so they don't go unnoticed.
+        """
+        axis = self.mirror_axis_combo.currentText().lower()
+        mirrored, flipped, skipped = self._presenter.mirror_controls(axis)
+        if mirrored + flipped + skipped == 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Mirror",
+                "Select one or more controls in the Maya viewport first.",
+            )
+            return
+        log.info("mirror: %d to opposite, %d flipped, %d skipped",
+                 mirrored, flipped, skipped)
+        if skipped:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Mirror",
+                "Mirrored {} to opposite, flipped {} in place, skipped {}.\n"
+                "Skipped controls had an ambiguous opposite-side name (more "
+                "than one match) or no curve shapes.".format(
+                    mirrored, flipped, skipped),
+            )
+
+    # ------------------------------------------------------------------
+    # Viewport control colour
+    # ------------------------------------------------------------------
+
+    def _set_viewport_color(self, rgb: tuple) -> None:
+        """Apply the picked colour to every control selected in the viewport."""
+        if self._presenter.set_viewport_color(rgb) == 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Control Color",
+                "Select one or more controls in the Maya viewport first.",
+            )
+
+    def _reset_viewport_color(self) -> None:
+        """Clear the colour override on the selected viewport controls."""
+        if self._presenter.reset_viewport_color() == 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Control Color",
+                "Select one or more controls in the Maya viewport first.",
+            )
+
     # ------------------------------------------------------------------
     # Scale — CV-level scale of selected Maya controls
     # ------------------------------------------------------------------
+    # A single slider/spinbox/reset drives the scale; the X/Y/Z checkboxes
+    # decide which object-space axes each gesture touches (all on = uniform).
+
+    def _checked_axes(self) -> str:
+        """Return the ticked axes as a string, e.g. ``"xyz"`` or ``"xz"``."""
+        return "".join(
+            ax for ax in ("x", "y", "z") if self.scale_axis_cbs[ax].isChecked()
+        )
+
+    def _update_scale_range(self) -> None:
+        """Apply the min/max textboxes to the scale slider's range.
+
+        The min field is constrained to negatives and max to positives, so 0%
+        (neutral) always sits inside the span — no crossing guard is needed.
+        """
+        self.scale_slider.setRange(
+            self.scale_min_spin.value(), self.scale_max_spin.value()
+        )
 
     def _scale_slider_pressed(self) -> None:
         """Start a slider-drag gesture. Opens one undo chunk for the gesture."""
         # If the snap-back animation is still running from a previous gesture,
-        # cancel it and silently reset to 100 so the new gesture starts from
+        # cancel it and silently reset to 0% so the new gesture starts from
         # a clean baseline (scale_drag_start records the starting value).
         anim = getattr(self, "_scale_snap_anim", None)
         if anim is not None and anim.state() == QtCore.QAbstractAnimation.Running:
             anim.stop()
             self.scale_slider.blockSignals(True)
-            self.scale_slider.setValue(100)
+            self.scale_slider.setValue(0)
             self.scale_slider.blockSignals(False)
         value = self.scale_slider.value()
-        self._presenter.scale_drag_start(value)
+        self._presenter.scale_drag_start(
+            value,
+            axes=self._checked_axes(),
+            from_center=self.scale_center_cb.isChecked(),
+        )
         # Mirror the slider value into the spinbox during drag (read-only feel).
         self._sync_spin_to_slider(value)
 
@@ -703,9 +876,9 @@ class ControlMe(QtWidgets.QWidget):
         self._sync_spin_to_slider(value)
 
     def _scale_slider_released(self) -> None:
-        """End drag: close undo chunk and snap slider + spinbox back to 100%."""
+        """End drag: close undo chunk and snap slider + spinbox back to 0%."""
         self._presenter.scale_drag_end()
-        self._snap_scale_to_100()
+        self._snap_scale_to_neutral()
 
     def _sync_spin_to_slider(self, value: int) -> None:
         """Update the spinbox display without triggering its handler."""
@@ -713,16 +886,16 @@ class ControlMe(QtWidgets.QWidget):
         self.scale_spin.setValue(value)
         self.scale_spin.blockSignals(False)
 
-    def _snap_scale_to_100(self) -> None:
-        """Animate slider + spinbox back to 100% so the user sees the reset.
+    def _snap_scale_to_neutral(self) -> None:
+        """Animate slider + spinbox back to 0% so the user sees the reset.
 
         The drag session is already closed by ``scale_drag_end`` before this
         runs, so the valueChanged signals fired during the animation are
         no-ops in scale_drag_apply (early return when session is None).
         """
         current = self.scale_slider.value()
-        if current == 100:
-            self._sync_spin_to_slider(100)
+        if current == 0:
+            self._sync_spin_to_slider(0)
             return
         anim = getattr(self, "_scale_snap_anim", None)
         if anim is not None:
@@ -730,20 +903,24 @@ class ControlMe(QtWidgets.QWidget):
         anim = QtCore.QPropertyAnimation(self.scale_slider, b"value", self)
         anim.setDuration(180)
         anim.setStartValue(current)
-        anim.setEndValue(100)
+        anim.setEndValue(0)
         anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
         anim.start()
         self._scale_snap_anim = anim
 
     def _scale_apply_manual(self) -> None:
-        """Apply the spinbox percentage as a scale factor, then reset to 100."""
-        self._presenter.scale_apply_manual(self.scale_spin.value())
-        self._sync_spin_to_slider(100)
+        """Apply the spinbox % change as a scale factor, then reset to 0%."""
+        self._presenter.scale_apply_manual(
+            self.scale_spin.value(),
+            axes=self._checked_axes(),
+            from_center=self.scale_center_cb.isChecked(),
+        )
+        self._sync_spin_to_slider(0)
 
     def _scale_reset(self) -> None:
-        """Restore selected controls to their original (pre-scale) CV positions."""
-        self._presenter.scale_reset()
-        self._snap_scale_to_100()
+        """Restore selected controls to original size on the ticked axes only."""
+        self._presenter.scale_reset(axes=self._checked_axes())
+        self._snap_scale_to_neutral()
 
     # ------------------------------------------------------------------
     # Viewport drag-and-drop
@@ -816,6 +993,56 @@ class ControlMe(QtWidgets.QWidget):
             log.exception("DB import failed")
             QtWidgets.QMessageBox.critical(self, "Import Failed", str(exc))
 
+    def _save_scene_controls(self) -> None:
+        dest, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save Scene Controls", "scene_controls.json", "JSON (*.json)"
+        )
+        if not dest:
+            return
+        try:
+            result = self._presenter.save_scene_snapshot(dest)
+            log.info(
+                "Scene controls snapshot saved (replaced=%d, added=%d) → %s",
+                len(result.replaced), len(result.added), dest,
+            )
+            if not result.saved:
+                msg = f"No curve controls in scene — file left untouched:\n{dest}"
+            else:
+                msg = (
+                    f"Replaced {len(result.replaced)}, added {len(result.added)} "
+                    f"controls in:\n{dest}"
+                )
+            QtWidgets.QMessageBox.information(self, "Save Scene Controls", msg)
+        except Exception as exc:
+            log.exception("Save scene controls failed")
+            QtWidgets.QMessageBox.critical(self, "Save Failed", str(exc))
+
+    def _load_scene_controls(self) -> None:
+        src, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load Scene Controls", "", "JSON (*.json)"
+        )
+        if not src:
+            return
+        try:
+            result = self._presenter.load_scene_snapshot(src)
+        except Exception as exc:
+            log.exception("Load scene controls failed")
+            QtWidgets.QMessageBox.critical(self, "Load Failed", str(exc))
+            return
+
+        lines = [f"Replaced: {len(result.replaced)}"]
+        if result.missing:
+            lines.append(f"Missing in scene ({len(result.missing)}):")
+            lines.append("  " + ", ".join(result.missing[:20])
+                         + ("…" if len(result.missing) > 20 else ""))
+        if result.ambiguous:
+            lines.append(f"Ambiguous names ({len(result.ambiguous)}):")
+            lines.append("  " + ", ".join(result.ambiguous[:20])
+                         + ("…" if len(result.ambiguous) > 20 else ""))
+        QtWidgets.QMessageBox.information(
+            self, "Load Scene Controls", "\n".join(lines)
+        )
+
     def _open_log(self) -> None:
         import subprocess
         import sys
@@ -884,12 +1111,12 @@ class ControlMe(QtWidgets.QWidget):
         replace_color = self._settings.value("replace_color")
         if replace_color is not None:
             self.replace_color_cb.setChecked(replace_color == "true")
-        extract_to_mgear = self._settings.value("extract_to_mgear")
-        # Only restore when the checkbox is currently enabled (mGear was
-        # detected). If mGear is not installed on this machine, a previously
-        # saved "true" must not re-enable the disabled checkbox.
-        if extract_to_mgear is not None and self.extract_mgear_cb.isEnabled():
-            self.extract_mgear_cb.setChecked(extract_to_mgear == "true")
+        scale_from_center = self._settings.value("scale_from_center")
+        if scale_from_center is not None:
+            self.scale_center_cb.setChecked(scale_from_center == "true")
+        mirror_axis = self._settings.value("mirror_axis")
+        if mirror_axis in ("X", "Y", "Z"):
+            self.mirror_axis_combo.setCurrentText(mirror_axis)
 
     def _save_settings(self) -> None:
         self._settings.setValue("geometry", self.saveGeometry())
@@ -901,8 +1128,9 @@ class ControlMe(QtWidgets.QWidget):
         self._settings.setValue("replace_name", str(self.replace_name_cb.isChecked()).lower())
         self._settings.setValue("replace_color", str(self.replace_color_cb.isChecked()).lower())
         self._settings.setValue(
-            "extract_to_mgear", str(self.extract_mgear_cb.isChecked()).lower()
+            "scale_from_center", str(self.scale_center_cb.isChecked()).lower()
         )
+        self._settings.setValue("mirror_axis", self.mirror_axis_combo.currentText())
 
     # Window width below which the toolbar buttons drop their labels and
     # render icon-only. Tooltips still describe each action.

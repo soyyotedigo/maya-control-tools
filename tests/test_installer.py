@@ -39,6 +39,53 @@ def test_modules_dir_composes_path(monkeypatch, tmp_path):
     assert installer.modules_dir("2025") == str(tmp_path / "2025" / "modules")
 
 
+def test_global_modules_dir_is_version_independent(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAYA_APP_DIR", str(tmp_path))
+    assert installer.global_modules_dir() == str(tmp_path / "modules")
+
+
+# ---------------------------------------------------------------------------
+# remove_controlme_from / purge_per_version_installs
+# ---------------------------------------------------------------------------
+
+def _seed_install(modules: Path) -> None:
+    """Create a ControlMe folder + .mod file under a modules dir."""
+    (modules / "ControlMe").mkdir(parents=True)
+    (modules / "ControlMe" / "marker.txt").write_text("x", encoding="utf-8")
+    (modules / "ControlMe.mod").write_text("+ ControlMe 1.0.0 ...", encoding="utf-8")
+
+
+def test_remove_controlme_from_reports_and_removes(tmp_path):
+    modules = tmp_path / "modules"
+    _seed_install(modules)
+
+    assert installer.remove_controlme_from(str(modules)) is True
+    assert not (modules / "ControlMe").exists()
+    assert not (modules / "ControlMe.mod").exists()
+
+
+def test_remove_controlme_from_false_when_clean(tmp_path):
+    modules = tmp_path / "modules"
+    modules.mkdir()
+    assert installer.remove_controlme_from(str(modules)) is False
+
+
+def test_purge_per_version_installs(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAYA_APP_DIR", str(tmp_path))
+    _seed_install(tmp_path / "2024" / "modules")
+    _seed_install(tmp_path / "2025" / "modules")
+    (tmp_path / "2023").mkdir()  # version with no install — must be skipped
+
+    removed = installer.purge_per_version_installs()
+
+    assert removed == [
+        str(tmp_path / "2024" / "modules"),
+        str(tmp_path / "2025" / "modules"),
+    ]
+    assert not (tmp_path / "2024" / "modules" / "ControlMe").exists()
+    assert not (tmp_path / "2025" / "modules" / "ControlMe.mod").exists()
+
+
 # ---------------------------------------------------------------------------
 # find_maya_versions
 # ---------------------------------------------------------------------------
@@ -194,16 +241,15 @@ def test_real_mod_template_substitutes_correctly(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_install_module_end_to_end(monkeypatch, tmp_path):
-    """install() should auto-detect the Maya version, copy the package,
-    write a valid .mod file, and produce the expected layout."""
-    # Pretend Maya 2025 is installed under tmp_path.
+    """install(maya_version=...) should copy the package, write a valid .mod
+    file, and produce the expected per-version layout."""
     monkeypatch.setenv("MAYA_APP_DIR", str(tmp_path))
     (tmp_path / "2025").mkdir()
 
     src = _make_fake_src(tmp_path / "src")
 
     import install_module
-    install_module.install(src_dir=str(src))
+    install_module.install(maya_version="2025", src_dir=str(src))
 
     modules = tmp_path / "2025" / "modules"
     install_dir = modules / "ControlMe"
@@ -218,3 +264,25 @@ def test_install_module_end_to_end(monkeypatch, tmp_path):
     # Real version from the fake src's config.toml.
     assert "1.2.3" in content
     assert str(install_dir).replace("\\", "/") in content
+
+
+def test_install_module_global_by_default(monkeypatch, tmp_path):
+    """No --maya → install into the global modules dir and purge any
+    pre-existing per-version install."""
+    monkeypatch.setenv("MAYA_APP_DIR", str(tmp_path))
+    # A stale per-version install that must be swept away.
+    _seed_install(tmp_path / "2025" / "modules")
+
+    src = _make_fake_src(tmp_path / "src")
+
+    import install_module
+    install_module.install(src_dir=str(src))  # maya_version=None → global
+
+    modules = tmp_path / "modules"
+    install_dir = modules / "ControlMe"
+    assert (install_dir / "app" / "__init__.py").is_file()
+    assert (install_dir / "config.toml").is_file()
+    assert (modules / "ControlMe.mod").is_file()
+    # The old per-version copy was removed.
+    assert not (tmp_path / "2025" / "modules" / "ControlMe").exists()
+    assert not (tmp_path / "2025" / "modules" / "ControlMe.mod").exists()

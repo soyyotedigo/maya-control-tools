@@ -84,23 +84,23 @@ class TestScaleDragLifecycle:
         presenter = ControlPresenter(svc=_FakeService())
         session_mock = MagicMock()
         presenter._scale_drag_session = session_mock
-        presenter._scale_drag_last = 100
+        presenter._scale_drag_last = 0  # neutral, factor 1.0
 
-        presenter.scale_drag_apply(150)
+        presenter.scale_drag_apply(100)
 
-        # 150 / 100 == 1.5
-        session_mock.apply.assert_called_once_with(1.5)
-        assert presenter._scale_drag_last == 150
+        # factor(100)/factor(0) == 2.0/1.0 == 2.0
+        session_mock.apply.assert_called_once_with(2.0)
+        assert presenter._scale_drag_last == 100
 
-    def test_drag_apply_skips_identity_and_zero(self):
+    def test_drag_apply_skips_identity_and_invalid(self):
         presenter = ControlPresenter(svc=_FakeService())
         session_mock = MagicMock()
         presenter._scale_drag_session = session_mock
-        presenter._scale_drag_last = 100
+        presenter._scale_drag_last = 50
 
-        presenter.scale_drag_apply(100)  # identity
-        presenter._scale_drag_last = 0
-        presenter.scale_drag_apply(50)   # last <= 0 guard
+        presenter.scale_drag_apply(50)    # identity (same value)
+        presenter._scale_drag_last = -100  # factor 0.0 → invalid baseline
+        presenter.scale_drag_apply(0)
 
         session_mock.apply.assert_not_called()
 
@@ -120,7 +120,7 @@ class TestScaleDragLifecycle:
 
         session_mock.end.assert_called_once()
         assert presenter._scale_drag_session is None
-        assert presenter._scale_drag_last == 100
+        assert presenter._scale_drag_last == 0
 
     def test_drag_end_without_session_is_noop(self):
         presenter = ControlPresenter(svc=_FakeService())
@@ -146,9 +146,23 @@ class TestManualScaleAndReset:
 
         assert count == 3
         ensure_mock.assert_called_once_with(presenter._cv_snapshots)
-        scale_mock.assert_called_once_with(1.5)
+        # 150% delta → factor 1 + 1.5 == 2.5
+        scale_mock.assert_called_once_with(2.5, axes="xyz", from_center=False)
 
-    def test_manual_apply_skips_non_positive_percent(self):
+    def test_manual_apply_scales_down_on_negative_percent(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        scale_mock = MagicMock(return_value=1)
+        with patch(
+            "app.core.operations.ensure_snapshots_for_selection", MagicMock(),
+        ), patch(
+            "app.core.operations.scale_selected_cvs", scale_mock,
+        ):
+            presenter.scale_apply_manual(-50)
+
+        # -50% delta → factor 0.5
+        scale_mock.assert_called_once_with(0.5, axes="xyz", from_center=False)
+
+    def test_manual_apply_skips_zero_and_invalid(self):
         presenter = ControlPresenter(svc=_FakeService())
         ensure_mock = MagicMock()
         scale_mock = MagicMock()
@@ -157,9 +171,9 @@ class TestManualScaleAndReset:
         ), patch(
             "app.core.operations.scale_selected_cvs", scale_mock,
         ):
-            count = presenter.scale_apply_manual(0)
+            assert presenter.scale_apply_manual(0) == 0     # no change
+            assert presenter.scale_apply_manual(-100) == 0  # factor 0.0 → invalid
 
-        assert count == 0
         ensure_mock.assert_not_called()
         scale_mock.assert_not_called()
 
@@ -172,8 +186,109 @@ class TestManualScaleAndReset:
             count = presenter.scale_reset()
 
         assert count == 1
-        reset_mock.assert_called_once_with(presenter._cv_snapshots)
+        reset_mock.assert_called_once_with(
+            presenter._cv_snapshots, axes="xyz",
+        )
         assert presenter.has_scale_snapshots is True  # snapshots survive reset
+
+    def test_reset_forwards_axes(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        presenter._cv_snapshots["arm_ctrl"] = {"shape1": [(0, 0, 0)]}
+        reset_mock = MagicMock(return_value=1)
+        with patch("app.core.operations.reset_selected_cvs", reset_mock):
+            presenter.scale_reset(axes="xz")
+
+        reset_mock.assert_called_once_with(
+            presenter._cv_snapshots, axes="xz",
+        )
+
+    def test_drag_start_forwards_axes(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        start_mock = MagicMock(return_value=MagicMock())
+        with patch(
+            "app.core.operations.ensure_snapshots_for_selection", MagicMock(),
+        ), patch(
+            "app.core.operations.ScaleDragSession.start", start_mock,
+        ):
+            presenter.scale_drag_start(slider_value=100, axes="xy")
+
+        start_mock.assert_called_once_with(axes="xy", from_center=False)
+
+    def test_manual_apply_forwards_axes(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        scale_mock = MagicMock(return_value=2)
+        with patch(
+            "app.core.operations.ensure_snapshots_for_selection", MagicMock(),
+        ), patch(
+            "app.core.operations.scale_selected_cvs", scale_mock,
+        ):
+            presenter.scale_apply_manual(150, axes="z")
+
+        # 150% delta → factor 2.5
+        scale_mock.assert_called_once_with(2.5, axes="z", from_center=False)
+
+    def test_drag_start_forwards_from_center(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        start_mock = MagicMock(return_value=MagicMock())
+        with patch(
+            "app.core.operations.ensure_snapshots_for_selection", MagicMock(),
+        ), patch(
+            "app.core.operations.ScaleDragSession.start", start_mock,
+        ):
+            presenter.scale_drag_start(slider_value=100, from_center=True)
+
+        start_mock.assert_called_once_with(axes="xyz", from_center=True)
+
+    def test_manual_apply_forwards_from_center(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        scale_mock = MagicMock(return_value=2)
+        with patch(
+            "app.core.operations.ensure_snapshots_for_selection", MagicMock(),
+        ), patch(
+            "app.core.operations.scale_selected_cvs", scale_mock,
+        ):
+            presenter.scale_apply_manual(150, from_center=True)
+
+        scale_mock.assert_called_once_with(2.5, axes="xyz", from_center=True)
+
+
+# ---------------------------------------------------------------------------
+# Mirror delegates to operations
+# ---------------------------------------------------------------------------
+
+class TestMirrorControls:
+    def test_mirror_forwards_axis_and_returns_counts(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        mirror_mock = MagicMock(return_value=(2, 1, 0))
+        with patch("app.core.operations.mirror_selected_controls", mirror_mock):
+            result = presenter.mirror_controls("y")
+
+        assert result == (2, 1, 0)
+        mirror_mock.assert_called_once_with("y")
+
+
+# ---------------------------------------------------------------------------
+# Viewport control colour delegates to operations
+# ---------------------------------------------------------------------------
+
+class TestViewportColor:
+    def test_set_delegates(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        set_mock = MagicMock(return_value=3)
+        with patch("app.core.operations.set_selected_controls_color", set_mock):
+            count = presenter.set_viewport_color((1.0, 0.0, 0.0))
+
+        assert count == 3
+        set_mock.assert_called_once_with((1.0, 0.0, 0.0))
+
+    def test_reset_delegates(self):
+        presenter = ControlPresenter(svc=_FakeService())
+        reset_mock = MagicMock(return_value=3)
+        with patch("app.core.operations.reset_selected_controls_color", reset_mock):
+            count = presenter.reset_viewport_color()
+
+        assert count == 3
+        reset_mock.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -205,26 +320,6 @@ class TestDelegation:
             return_value=2,
         ):
             assert presenter.replace_control_shape({"name": "x"}) == 2
-
-    def test_replace_forwards_extract_to_mgear_flag(self):
-        presenter = ControlPresenter(svc=_FakeService())
-        replace_mock = MagicMock(return_value=1)
-        with patch(
-            "app.core.operations.replace_controls_in_selection", replace_mock
-        ):
-            presenter.replace_control_shape(
-                {"name": "x"},
-                replace_name=True,
-                replace_color=False,
-                extract_to_mgear=True,
-            )
-
-        replace_mock.assert_called_once_with(
-            {"name": "x"},
-            replace_name=True,
-            replace_color=False,
-            extract_to_mgear=True,
-        )
 
     def test_rotate_returns_operation_count(self):
         presenter = ControlPresenter(svc=_FakeService())

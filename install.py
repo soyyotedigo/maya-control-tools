@@ -2,15 +2,17 @@
 ControlMe — drag-and-drop installer for Maya.
 
 Drag this file into Maya's viewport. Maya calls ``onMayaDroppedPythonFile``
-automatically, which installs ControlMe as a proper Maya module:
+automatically, which installs ControlMe as a proper Maya module into the
+version-independent modules folder, so it loads in every Maya version:
 
-    ~/Documents/maya/<version>/modules/
+    ~/Documents/maya/modules/
         ControlMe.mod
         ControlMe/
             app/  config.toml  scripts/  icons/
 
-Re-running is safe — it overwrites in place. See ``install_module.py``
-for the CLI equivalent.
+Any older per-version install is removed first so Maya never loads two
+copies. Re-running is safe — it overwrites in place. See
+``install_module.py`` for the CLI equivalent.
 """
 
 import os
@@ -41,13 +43,16 @@ def _install():
         sys.path.insert(0, src_dir)
     from module.installer import (
         copy_package,
-        modules_dir,
+        global_modules_dir,
+        purge_per_version_installs,
         read_app_version,
         write_mod_file,
     )
 
-    maya_version = cmds.about(version=True)
-    modules = modules_dir(maya_version)
+    # Remove any older per-version installs so Maya doesn't load two copies.
+    removed = purge_per_version_installs()
+
+    modules = global_modules_dir()
     install_dir = os.path.join(modules, "ControlMe")
     version = read_app_version(src_dir)
 
@@ -62,15 +67,19 @@ def _install():
 
     _create_shelf_button(cmds, mel)
 
+    migrated = (
+        "\nRemoved {} older per-version install(s).".format(len(removed))
+        if removed else ""
+    )
     cmds.confirmDialog(
         title="ControlMe Installed",
         message=(
-            "ControlMe v{} installed.\n\n"
+            "ControlMe v{} installed globally (loads in all Maya versions).\n\n"
             "Module : {}\n"
-            ".mod   : {}\n\n"
+            ".mod   : {}\n{}\n"
             "A shelf button has been added to the active shelf.\n"
             "Restart Maya so the module loads on every startup."
-        ).format(version, install_dir, mod_path),
+        ).format(version, install_dir, mod_path, migrated),
         button=["OK"],
         defaultButton="OK",
     )

@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Callable
 
 from app.compat import QtCore, QtWidgets, is_maya
-from app.config import WINDOW_TITLE, WORKSPACE_CONTROL_NAME
+from app.config import VERSION, WINDOW_TITLE, WORKSPACE_CONTROL_NAME
 from app.logger import log
 from app.views.images_view import _MIME_TYPE
 
@@ -164,7 +164,14 @@ def show_as_workspace_control(
 
     if exists and not force_reload:
         # Panel already exists — just raise it and refresh the content.
-        cmds.workspaceControl(WORKSPACE_CONTROL_NAME, edit=True, restore=True)
+        # Re-apply the label so the docked tab picks up version bumps;
+        # Maya only honors the label kwarg at creation otherwise.
+        cmds.workspaceControl(
+            WORKSPACE_CONTROL_NAME,
+            edit=True,
+            restore=True,
+            label=f"{WINDOW_TITLE}  v{VERSION}",
+        )
         _populate_workspace()
         return
 
@@ -182,7 +189,7 @@ def show_as_workspace_control(
 
     cmds.workspaceControl(
         WORKSPACE_CONTROL_NAME,
-        label=WINDOW_TITLE,
+        label=f"{WINDOW_TITLE}  v{VERSION}",
         dockToMainWindow=("right", 1),
         initialWidth=520,
         initialHeight=600,

@@ -95,6 +95,12 @@ def _build_qt_test_stub():
         NoPen = 3
         NoBrush = 4
         Window = 5
+        AlignCenter = 0x84
+        AlignLeft = 0x01
+        AlignRight = 0x02
+        AlignHCenter = 0x04
+        AlignVCenter = 0x80
+        Vertical = 2
 
     class _QEvent:
         MouseButtonRelease = 2
@@ -372,6 +378,16 @@ def _build_qt_test_stub():
         QDrag = _QDrag
         QMouseEvent = _QMouseEvent
 
+    class _StubFont:
+        def setBold(self, _value):
+            return None
+
+        def setPointSize(self, _value):
+            return None
+
+        def setItalic(self, _value):
+            return None
+
     class _Widget:
         def __init__(self, parent=None):
             self.parent = parent
@@ -381,6 +397,25 @@ def _build_qt_test_stub():
             self._style = ""
             self._object_name = ""
             self._accept_drops = False
+            self._font = _StubFont()
+
+        def font(self):
+            return self._font
+
+        def setFont(self, font):
+            self._font = font
+
+        def setWordWrap(self, _wrap):
+            return None
+
+        def setEnabled(self, enabled):
+            self._enabled = bool(enabled)
+
+        def isEnabled(self):
+            return getattr(self, "_enabled", True)
+
+        def setMinimumWidth(self, _value):
+            return None
 
         def close(self):
             self._closed = True
@@ -404,6 +439,9 @@ def _build_qt_test_stub():
             return None
 
         def setWindowTitle(self, _title):
+            return None
+
+        def setWindowIcon(self, _icon):
             return None
 
         def setWindowFlags(self, _flags):
@@ -608,6 +646,9 @@ def _build_qt_test_stub():
         def setSelectionMode(self, _mode):
             return None
 
+        def setEditTriggers(self, _triggers):
+            return None
+
         def setContextMenuPolicy(self, _policy):
             return None
 
@@ -677,6 +718,7 @@ def _build_qt_test_stub():
 
     class _QLineEdit(_Widget):
         textChanged = _SignalDescriptor()
+        returnPressed = _SignalDescriptor()
 
         def __init__(self, parent=None):
             super().__init__(parent)
@@ -704,13 +746,13 @@ def _build_qt_test_stub():
             if parent is not None and hasattr(parent, "_layout"):
                 parent._layout = self
 
-        def addWidget(self, widget):
+        def addWidget(self, widget, *_args, **_kwargs):
             self.children.append(widget)
 
-        def addLayout(self, layout):
+        def addLayout(self, layout, *_args, **_kwargs):
             self.children.append(layout)
 
-        def addStretch(self):
+        def addStretch(self, *_args):
             self.children.append("stretch")
 
         def addSpacing(self, value):
@@ -731,6 +773,16 @@ def _build_qt_test_stub():
     class _QVBoxLayout(_BaseLayout):
         pass
 
+    class _QGridLayout(_BaseLayout):
+        def setHorizontalSpacing(self, _value):
+            return None
+
+        def setVerticalSpacing(self, _value):
+            return None
+
+        def setColumnStretch(self, *_args):
+            return None
+
     class _QFrame(_Widget):
         StyledPanel = 1
 
@@ -739,6 +791,7 @@ def _build_qt_test_stub():
 
     class _QAbstractItemView:
         ExtendedSelection = 1
+        NoEditTriggers = 0
 
     class _QListView:
         IconMode = 1
@@ -746,7 +799,12 @@ def _build_qt_test_stub():
         Static = 3
 
     class _QSlider(_Widget):
+        NoTicks = 0
+        TicksBelow = 1
+        TicksAbove = 2
         valueChanged = _SignalDescriptor()
+        sliderPressed = _SignalDescriptor()
+        sliderReleased = _SignalDescriptor()
 
         def __init__(self, _orientation=None, parent=None):
             super().__init__(parent)
@@ -762,6 +820,15 @@ def _build_qt_test_stub():
                 self.valueChanged.emit(value)
 
         def setTickInterval(self, _value):
+            return None
+
+        def setTickPosition(self, _value):
+            return None
+
+        def setSingleStep(self, _value):
+            return None
+
+        def setPageStep(self, _value):
             return None
 
         def setToolTip(self, _text):
@@ -801,6 +868,52 @@ def _build_qt_test_stub():
         def blockSignals(self, value):
             self._blocked = value
 
+    class _QAbstractSpinBox:
+        NoButtons = 0
+
+    class _QSpinBox(_Widget):
+        valueChanged = _SignalDescriptor()
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._value = 0
+            self._blocked = False
+            self._line_edit = _QLineEdit()
+
+        def setRange(self, _lo, _hi):
+            return None
+
+        def setValue(self, value):
+            self._value = value
+            if not self._blocked:
+                self.valueChanged.emit(value)
+
+        def value(self):
+            return self._value
+
+        def setSuffix(self, _suffix):
+            return None
+
+        def setAlignment(self, _alignment):
+            return None
+
+        def setButtonSymbols(self, _symbols):
+            return None
+
+        def setToolTip(self, _text):
+            return None
+
+        def lineEdit(self):
+            return self._line_edit
+
+        def blockSignals(self, value):
+            self._blocked = value
+
+    class _QGroupBox(_Widget):
+        def __init__(self, title="", parent=None):
+            super().__init__(parent)
+            self.title = title
+
     class _QLabel(_Widget):
         def __init__(self, text="", parent=None):
             super().__init__(parent)
@@ -820,6 +933,31 @@ def _build_qt_test_stub():
 
         def setFlat(self, _flat):
             return None
+
+        def setIcon(self, icon):
+            self._icon = icon
+
+        def setIconSize(self, _size):
+            return None
+
+    class _QCheckBox(_Widget):
+        toggled = _SignalDescriptor()
+
+        def __init__(self, text="", parent=None):
+            super().__init__(parent)
+            self.text = text
+            self._checked = False
+            self._icon = None
+
+        def setChecked(self, value):
+            value = bool(value)
+            changed = value != self._checked
+            self._checked = value
+            if changed:
+                self.toggled.emit(value)
+
+        def isChecked(self):
+            return self._checked
 
         def setIcon(self, icon):
             self._icon = icon
@@ -910,11 +1048,16 @@ def _build_qt_test_stub():
         QLineEdit = _QLineEdit
         QHBoxLayout = _QHBoxLayout
         QVBoxLayout = _QVBoxLayout
+        QGridLayout = _QGridLayout
         QFrame = _QFrame
         QAbstractItemView = _QAbstractItemView
         QListView = _QListView
         QSlider = _QSlider
         QComboBox = _QComboBox
+        QSpinBox = _QSpinBox
+        QAbstractSpinBox = _QAbstractSpinBox
+        QCheckBox = _QCheckBox
+        QGroupBox = _QGroupBox
         QLabel = _QLabel
         QDialog = _QDialog
         QPushButton = _QPushButton
